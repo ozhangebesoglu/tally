@@ -137,6 +137,29 @@ UBER\s(?!EATS),Uber,Transport,Rideshare
 UBER\s*EATS,Uber Eats,Food,Delivery
 ```
 
+### Inline Modifiers
+
+Target specific transactions by amount or date using inline modifiers:
+
+```csv
+# Amount modifiers
+COSTCO[amount>200],Costco Bulk,Shopping,Bulk
+STARBUCKS[amount<10],Quick Coffee,Food,Coffee
+BESTBUY[amount=499.99],TV Purchase,Shopping,Electronics
+RESTAURANT[amount:20-100],Dining Out,Food,Restaurant
+
+# Date modifiers
+COSTCO[date=2025-01-15],Costco Jan 15,Shopping,Grocery
+SUBSCRIPTION[date:2025-01-01..2025-06-30],H1 Subscription,Bills,Subscription
+PURCHASE[date:last30days],Recent Purchase,Shopping,Retail
+HOLIDAY[month=12],December Shopping,Shopping,Gifts
+
+# Combined (AND logic)
+COSTCO(?!GAS)[amount>200][date=2025-01-15],Specific Costco Trip,Shopping,Bulk
+```
+
+This lets an AI express rules like *"that $500 Best Buy purchase on December 15th was a gift"* as a pattern that targets exactly that transaction.
+
 ## For AI Agents
 
 When you run `tally init`, it creates `AGENTS.md` with detailed instructions for AI assistants. The key commands:

@@ -99,7 +99,9 @@ def parse_amex(filepath, rules, home_locations=None):
                 amount = abs(amount)
 
                 date = datetime.strptime(row['Date'], '%m/%d/%Y')
-                merchant, category, subcategory = normalize_merchant(row['Description'], rules)
+                merchant, category, subcategory = normalize_merchant(
+                    row['Description'], rules, amount=amount, txn_date=date.date()
+                )
                 location = extract_location(row['Description'])
 
                 transactions.append({
@@ -142,7 +144,9 @@ def parse_boa(filepath, rules, home_locations=None):
                 if amount >= 0:  # Skip credits/income
                     continue
 
-                merchant, category, subcategory = normalize_merchant(description, rules)
+                merchant, category, subcategory = normalize_merchant(
+                    description, rules, amount=abs(amount), txn_date=date.date()
+                )
                 location = extract_location(description)
 
                 transactions.append({
@@ -239,7 +243,9 @@ def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_
                     location = extract_location(description)
 
                 # Normalize merchant
-                merchant, category, subcategory = normalize_merchant(description, rules)
+                merchant, category, subcategory = normalize_merchant(
+                    description, rules, amount=amount, txn_date=date.date()
+                )
 
                 transactions.append({
                     'date': date,

@@ -8,6 +8,15 @@ from credit card and bank statements.
 import csv
 import os
 import re
+from datetime import date
+from typing import Optional, List, Tuple
+
+from .modifier_parser import (
+    parse_pattern_with_modifiers,
+    check_all_conditions,
+    ParsedPattern,
+    ModifierParseError,
+)
 
 
 # =============================================================================
@@ -971,10 +980,15 @@ def load_merchant_rules(csv_path):
 
     CSV format: Pattern,Merchant,Category,Subcategory
 
+    Patterns support inline modifiers for amount/date matching:
+        COSTCO[amount>200] - Match COSTCO transactions over $200
+        BESTBUY[date=2025-01-15] - Match BESTBUY on specific date
+        MERCHANT[amount:50-200][date:2025-01-01..2025-12-31] - Combined
+
     Lines starting with # are treated as comments and skipped.
     Patterns are Python regular expressions matched against transaction descriptions.
 
-    Returns list of tuples: (pattern, merchant_name, category, subcategory)
+    Returns list of tuples: (pattern, merchant_name, category, subcategory, parsed_pattern)
     """
     if not os.path.exists(csv_path):
         return []  # No user rules file, just use baseline
@@ -986,13 +1000,23 @@ def load_merchant_rules(csv_path):
         reader = csv.DictReader(lines)
         for row in reader:
             # Skip empty patterns
-            if not row.get('Pattern', '').strip():
+            pattern_str = row.get('Pattern', '').strip()
+            if not pattern_str:
                 continue
+
+            # Parse pattern with inline modifiers
+            try:
+                parsed = parse_pattern_with_modifiers(pattern_str)
+            except ModifierParseError:
+                # Invalid modifier syntax - use pattern as-is without modifiers
+                parsed = ParsedPattern(regex_pattern=pattern_str)
+
             rules.append((
-                row['Pattern'],
+                parsed.regex_pattern,  # Pure regex for matching
                 row['Merchant'],
                 row['Category'],
-                row['Subcategory']
+                row['Subcategory'],
+                parsed  # Full parsed pattern with conditions
             ))
     return rules
 
@@ -1004,15 +1028,22 @@ def get_all_rules(csv_path=None):
         csv_path: Optional path to user's merchant_categories.csv
 
     Returns:
-        List of (pattern, merchant, category, subcategory) tuples.
+        List of (pattern, merchant, category, subcategory, parsed_pattern) tuples.
         User rules come first so they take priority over baseline.
     """
     user_rules = []
     if csv_path:
         user_rules = load_merchant_rules(csv_path)
 
+    # Convert baseline rules (4-tuples) to 5-tuples for consistency
+    baseline_rules_5tuple = []
+    for rule in BASELINE_RULES:
+        pattern, merchant, category, subcategory = rule
+        parsed = ParsedPattern(regex_pattern=pattern)
+        baseline_rules_5tuple.append((pattern, merchant, category, subcategory, parsed))
+
     # User rules first (checked first, can override baseline)
-    return user_rules + list(BASELINE_RULES)
+    return user_rules + baseline_rules_5tuple
 
 
 def diagnose_rules(csv_path=None):
@@ -1256,12 +1287,19 @@ def apply_special_transformations(description):
     return None  # No special transformation applies
 
 
-def normalize_merchant(description, rules):
+def normalize_merchant(
+    description: str,
+    rules: list,
+    amount: Optional[float] = None,
+    txn_date: Optional[date] = None
+) -> Tuple[str, str, str]:
     """Normalize a merchant description to (name, category, subcategory).
 
     Args:
         description: Raw transaction description
-        rules: List of (pattern, merchant, category, subcategory) tuples
+        rules: List of (pattern, merchant, category, subcategory, parsed_pattern) tuples
+        amount: Optional transaction amount for modifier matching
+        txn_date: Optional transaction date for modifier matching
 
     Returns:
         Tuple of (merchant_name, category, subcategory)
@@ -1277,12 +1315,29 @@ def normalize_merchant(description, rules):
     cleaned_upper = cleaned.upper()
 
     # Try pattern matching against both original and cleaned
-    for pattern, merchant, category, subcategory in rules:
+    for rule in rules:
+        # Handle both old format (4-tuple) and new format (5-tuple)
+        if len(rule) == 5:
+            pattern, merchant, category, subcategory, parsed = rule
+        else:
+            pattern, merchant, category, subcategory = rule
+            parsed = None
+
         try:
-            if re.search(pattern, desc_upper, re.IGNORECASE):
-                return (merchant, category, subcategory)
-            if re.search(pattern, cleaned_upper, re.IGNORECASE):
-                return (merchant, category, subcategory)
+            # Check regex pattern first (most common case)
+            regex_matches = (
+                re.search(pattern, desc_upper, re.IGNORECASE) or
+                re.search(pattern, cleaned_upper, re.IGNORECASE)
+            )
+            if not regex_matches:
+                continue
+
+            # If pattern has modifiers, check them
+            if parsed and (parsed.amount_conditions or parsed.date_conditions):
+                if not check_all_conditions(parsed, amount, txn_date):
+                    continue
+
+            return (merchant, category, subcategory)
         except re.error:
             # Invalid regex pattern, skip
             continue

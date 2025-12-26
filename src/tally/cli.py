@@ -217,6 +217,43 @@ This is the main file you'll edit. Each row maps a transaction pattern to a cate
 | `^ATT\\s` | Starts with "ATT " | Avoid matching "SEATTLE" |
 | `CHICK.FIL.A` | CHICK-FIL-A or CHICKFILA | `.` matches any char |
 
+### Inline Modifiers (Target Specific Transactions)
+
+Add conditions to patterns to match on amount or date:
+
+```csv
+# Amount modifiers
+COSTCO[amount>200],Costco Bulk,Shopping,Bulk
+STARBUCKS[amount<10],Quick Coffee,Food,Coffee
+BESTBUY[amount=499.99],TV Purchase,Shopping,Electronics
+RESTAURANT[amount:20-100],Dining Out,Food,Restaurant
+
+# Date modifiers
+COSTCO[date=2025-01-15],Costco Jan 15,Shopping,Grocery
+SUBSCRIPTION[date:2025-01-01..2025-06-30],H1 Subscription,Bills,Subscription
+PURCHASE[date:last30days],Recent Purchase,Shopping,Retail
+HOLIDAY[month=12],December Shopping,Shopping,Gifts
+
+# Combined (AND logic)
+COSTCO(?!GAS)[amount>200][date=2025-01-15],Specific Costco Trip,Shopping,Bulk
+```
+
+**Amount modifiers:**
+- `[amount>100]` - Greater than $100
+- `[amount>=100]` - Greater than or equal to $100
+- `[amount<50]` - Less than $50
+- `[amount<=50]` - Less than or equal to $50
+- `[amount=99.99]` - Exactly $99.99
+- `[amount:50-200]` - Between $50 and $200 (inclusive)
+
+**Date modifiers:**
+- `[date=2025-01-15]` - Exact date (YYYY-MM-DD format)
+- `[date:2025-01-01..2025-01-31]` - Date range (inclusive)
+- `[date:last30days]` - Within last N days
+- `[month=12]` - Any transaction in December (any year)
+
+Use modifiers to express rules like *"that $500 Best Buy purchase was a gift"* or *"Costco purchases over $200 are bulk shopping"*.
+
 ### Adding New Rules
 
 1. Look at the raw transaction description from the bank statement
@@ -689,6 +726,19 @@ The Pattern column uses Python regex (case-insensitive):
 | `UBER\\s(?!EATS)` | "UBER " not followed by "EATS" |
 | `COSTCO(?!.*GAS)` | "COSTCO" without "GAS" |
 | `^ATT\\s` | Starts with "ATT " |
+
+### Inline Modifiers (Target Specific Transactions)
+
+Add conditions to target transactions by amount or date:
+
+```csv
+COSTCO[amount>200],Costco Bulk,Shopping,Bulk
+BESTBUY[amount=499.99][date=2025-01-15],TV Purchase,Shopping,Electronics
+HOLIDAY[month=12],December Shopping,Shopping,Gifts
+```
+
+**Amount:** `[amount>N]`, `[amount<N]`, `[amount=N]`, `[amount:MIN-MAX]`
+**Date:** `[date=YYYY-MM-DD]`, `[date:START..END]`, `[date:lastNdays]`, `[month=N]`
 
 ## Common Categories
 
