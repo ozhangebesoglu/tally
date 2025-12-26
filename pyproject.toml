@@ -27,9 +27,18 @@ dependencies = [
 [project.scripts]
 tally = "tally.cli:main"
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tally"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
