@@ -1615,14 +1615,6 @@ def main():
         description='Let AI classify your transactions - LLM-powered spending categorization.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
-Commands:
-  init [dir]       Create a new budget directory with starter config files
-  run [config]     Analyze transactions and generate spending report
-  inspect <file>   Show CSV structure and suggest format string
-  discover [config]  Find unknown merchants and suggest rules
-  diag [config]    Show diagnostic info about config and rules
-  version          Show version information
-
 Examples:
   tally init                 Initialize in current directory
   tally init ./my-budget     Initialize in specified directory
