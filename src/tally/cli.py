@@ -1020,6 +1020,18 @@ def cmd_run(args):
     year = config.get('year', 2025)
     home_locations = config.get('home_locations', set())
     travel_labels = config.get('travel_labels', {})
+    data_sources = config.get('data_sources', [])
+
+    # Check for data sources early before printing anything
+    if not data_sources:
+        print("Error: No data sources configured", file=sys.stderr)
+        print(f"\nEdit {config_dir}/{args.settings} to add your data sources.", file=sys.stderr)
+        print(f"\nExample:", file=sys.stderr)
+        print(f"  data_sources:", file=sys.stderr)
+        print(f"    - name: AMEX", file=sys.stderr)
+        print(f"      file: data/amex.csv", file=sys.stderr)
+        print(f"      type: amex", file=sys.stderr)
+        sys.exit(1)
 
     if not args.quiet:
         print(f"Tally - {year}")
@@ -1039,12 +1051,6 @@ def cmd_run(args):
 
     # Parse transactions from configured data sources
     all_txns = []
-    data_sources = config.get('data_sources', [])
-
-    if not data_sources:
-        print("Error: No data sources configured in settings", file=sys.stderr)
-        print(f"\nEdit {config_dir}/settings.yaml to add your data sources.", file=sys.stderr)
-        sys.exit(1)
 
     for source in data_sources:
         filepath = os.path.join(config_dir, '..', source['file'])
@@ -1167,6 +1173,17 @@ def cmd_discover(args):
         sys.exit(1)
 
     home_locations = config.get('home_locations', set())
+    data_sources = config.get('data_sources', [])
+
+    if not data_sources:
+        print("Error: No data sources configured", file=sys.stderr)
+        print(f"\nEdit {config_dir}/{args.settings} to add your data sources.", file=sys.stderr)
+        print(f"\nExample:", file=sys.stderr)
+        print(f"  data_sources:", file=sys.stderr)
+        print(f"    - name: AMEX", file=sys.stderr)
+        print(f"      file: data/amex.csv", file=sys.stderr)
+        print(f"      type: amex", file=sys.stderr)
+        sys.exit(1)
 
     # Load merchant rules
     rules_file = os.path.join(config_dir, 'merchant_categories.csv')
@@ -1177,11 +1194,6 @@ def cmd_discover(args):
 
     # Parse transactions from configured data sources
     all_txns = []
-    data_sources = config.get('data_sources', [])
-
-    if not data_sources:
-        print("Error: No data sources configured in settings", file=sys.stderr)
-        sys.exit(1)
 
     for source in data_sources:
         filepath = os.path.join(config_dir, '..', source['file'])
@@ -1362,6 +1374,13 @@ def suggest_merchant_name(description):
 def cmd_inspect(args):
     """Handle the 'inspect' subcommand - show CSV structure and sample rows."""
     import csv
+
+    if not args.file:
+        print("Error: No file specified", file=sys.stderr)
+        print("\nUsage: tally inspect <file.csv>", file=sys.stderr)
+        print("\nExample:", file=sys.stderr)
+        print("  tally inspect data/transactions.csv", file=sys.stderr)
+        sys.exit(1)
 
     filepath = os.path.abspath(args.file)
 
@@ -1683,6 +1702,7 @@ Examples:
     )
     inspect_parser.add_argument(
         'file',
+        nargs='?',
         help='Path to the CSV file to inspect'
     )
     inspect_parser.add_argument(
