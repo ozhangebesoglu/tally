@@ -1,0 +1,134 @@
+name: PR Build
+
+on:
+  pull_request_target:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-15-intel
+            platform: macos-amd64
+          - os: macos-latest
+            platform: macos-arm64
+          - os: windows-latest
+            platform: windows-amd64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra build
+
+      - name: Inject PR version info
+        run: |
+          # PR version: 0.0.<pr_number>-<short_sha>
+          SHORT_SHA="${{ github.event.pull_request.head.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          PR_VERSION="0.0.${{ github.event.pull_request.number }}-${SHORT_SHA}"
+          sed -i.bak "s/^VERSION = .*/VERSION = \"${PR_VERSION}\"/" src/tally/_version.py
+          sed -i.bak "s/^GIT_SHA = .*/GIT_SHA = \"${{ github.event.pull_request.head.sha }}\"/" src/tally/_version.py
+          sed -i.bak "s|^REPO_URL = .*|REPO_URL = \"https://github.com/${{ github.repository }}\"|" src/tally/_version.py
+          rm -f src/tally/_version.py.bak
+          cat src/tally/_version.py
+        shell: bash
+
+      - name: Build executable
+        run: uv run pyinstaller --onefile src/tally/__main__.py --name tally
+
+      - name: Create zip (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd dist
+          zip tally-${{ matrix.platform }}.zip tally
+
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd dist
+          Compress-Archive -Path tally.exe -DestinationPath tally-${{ matrix.platform }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tally-${{ matrix.platform }}
+          path: dist/tally-${{ matrix.platform }}.zip
+
+  comment:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Build comment body
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          RUN_ID="${{ github.run_id }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          SHORT_SHA="${HEAD_SHA:0:7}"
+
+          cat > comment.md << 'EOF'
+          ## PR Build Available
+
+          Version: `0.0.PR_NUMBER-SHORT_SHA`
+
+          ### Install from this PR
+
+          **Linux / macOS:**
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/REPO/main/docs/install-pr.sh | bash -s -- PR_NUMBER
+          ```
+
+          **Windows PowerShell:**
+          ```powershell
+          irm https://raw.githubusercontent.com/REPO/main/docs/install-pr.ps1 | iex; Install-TallyPR PR_NUMBER
+          ```
+
+          **Manual download:** [View workflow run](https://github.com/REPO/actions/runs/RUN_ID) and download artifacts.
+
+          <details>
+          <summary>Requirements</summary>
+
+          - GitHub CLI (`gh`) must be installed and authenticated
+          - Run `gh auth login` if not already authenticated
+
+          </details>
+          EOF
+
+          # Replace placeholders
+          sed -i "s/PR_NUMBER/${PR_NUMBER}/g" comment.md
+          sed -i "s/SHORT_SHA/${SHORT_SHA}/g" comment.md
+          sed -i "s|REPO|${{ github.repository }}|g" comment.md
+          sed -i "s/RUN_ID/${RUN_ID}/g" comment.md
+
+          cat comment.md
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v3
+        id: find
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '## PR Build Available'
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: comment.md
+          edit-mode: replace
