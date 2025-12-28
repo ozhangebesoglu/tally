@@ -108,6 +108,10 @@ def resolve_source_format(source):
     - type: 'amex' or 'boa' (predefined parsers, backward compatible)
     - format: '{date:%m/%d/%Y}, {description}, {amount}' (custom format string)
 
+    For custom formats, also supports:
+    - columns.description: Template for combining custom captures
+      Example: "{merchant} ({type})" when format uses {type}, {merchant}
+
     Returns the source dict with additional keys:
     - '_parser_type': 'amex', 'boa', or 'generic'
     - '_format_spec': FormatSpec object (for generic parser) or None
@@ -117,8 +121,13 @@ def resolve_source_format(source):
     if 'format' in source:
         # Custom format string provided
         format_str = source['format']
+
+        # Check for columns.description template
+        columns = source.get('columns', {})
+        description_template = columns.get('description') if isinstance(columns, dict) else None
+
         try:
-            source['_format_spec'] = parse_format_string(format_str)
+            source['_format_spec'] = parse_format_string(format_str, description_template)
             source['_parser_type'] = 'generic'
         except ValueError as e:
             raise ValueError(f"Invalid format for source '{source.get('name', 'unknown')}': {e}")

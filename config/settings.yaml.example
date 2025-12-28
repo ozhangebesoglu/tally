@@ -21,6 +21,15 @@ data_sources:
   #   format: "{date:%d.%m.%Y},{description},{amount}"
   #   decimal_separator: ","  # 1.234,56 format
 
+  # Multi-column description example:
+  # Some banks split transaction info across columns (e.g., type + recipient).
+  # Use custom captures to combine them:
+  # - name: European Bank
+  #   file: data/bank.csv
+  #   format: "{date:%d.%m.%Y},{_},{txn_type},{vendor},{_},{amount}"
+  #   columns:
+  #     description: "{vendor} ({txn_type})"  # Combines columns into description
+
 # Location settings
 home_state: WA  # Used for badge coloring (green for home state)
 

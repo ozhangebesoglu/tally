@@ -230,18 +230,32 @@ def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_
         for row in reader:
             try:
                 # Ensure row has enough columns
-                max_col = max(format_spec.date_column, format_spec.description_column,
-                              format_spec.amount_column)
+                required_cols = [format_spec.date_column, format_spec.amount_column]
+                if format_spec.description_column is not None:
+                    required_cols.append(format_spec.description_column)
+                if format_spec.custom_captures:
+                    required_cols.extend(format_spec.custom_captures.values())
                 if format_spec.location_column is not None:
-                    max_col = max(max_col, format_spec.location_column)
+                    required_cols.append(format_spec.location_column)
+                max_col = max(required_cols)
 
                 if len(row) <= max_col:
                     continue  # Skip malformed rows
 
                 # Extract values
                 date_str = row[format_spec.date_column].strip()
-                description = row[format_spec.description_column].strip()
                 amount_str = row[format_spec.amount_column].strip()
+
+                # Build description from either mode
+                if format_spec.description_column is not None:
+                    # Mode 1: Simple {description}
+                    description = row[format_spec.description_column].strip()
+                else:
+                    # Mode 2: Custom captures + template
+                    captures = {}
+                    for name, col_idx in format_spec.custom_captures.items():
+                        captures[name] = row[col_idx].strip() if col_idx < len(row) else ''
+                    description = format_spec.description_template.format(**captures)
 
                 # Skip empty rows
                 if not date_str or not description or not amount_str:

@@ -27,12 +27,29 @@ This file provides guidance for Claude when working on this codebase.
   Fixes #42
   ```
 
+## Configuration Changes
+
+- **Always make backwards compatible changes** to `settings.yaml` format. Existing user configs should continue to work without modification.
+- If a breaking change is necessary, implement **automatic migration** in `config_loader.py` to convert old format to new format.
+- Document new configuration options in `config/settings.yaml.example`.
+
+## Error Messages & Diagnostics
+
+- **Error messages should be self-descriptive** and guide users/agents on what to do next.
+- Include specific suggestions in error messages (e.g., "Add: columns:\n  description: \"{field} ...\"").
+- **Use `tally diag`** to diagnose configuration issues. It shows:
+  - Config directory and settings file status
+  - Data sources with parsed format details (columns, custom captures, templates)
+  - Merchant rules (baseline + user rules)
+- The tool should be self-descriptive enough that users can fix issues without external documentation.
+
 ## Project Structure
 
 - `src/tally/` - Main source code
   - `analyzer.py` - Core analysis and HTML report generation
   - `merchant_utils.py` - Merchant normalization and rules
   - `format_parser.py` - CSV format parsing
+  - `config_loader.py` - Configuration loading and migration
 - `tests/` - Test files
 - `docs/` - Marketing website (GitHub Pages)
 - `config/` - Example configuration files

@@ -197,7 +197,17 @@ tally discover                    # Human-readable output
 tally discover --format csv       # CSV output for import
 tally discover --format json      # JSON output for programmatic use
 tally discover --limit 50         # Show top 50 by spend
+
+# Diagnose configuration issues
+tally diag                        # Show config, data sources, format parsing
 ```
+
+## Troubleshooting
+
+When something isn't working, use `tally diag` to inspect:
+- Configuration file location and status
+- Data source format parsing (columns, custom captures, templates)
+- Merchant rules (baseline + user-defined)
 
 ## Your Tasks
 
@@ -207,6 +217,7 @@ When working with this budget analyzer, you may be asked to:
 2. **Add merchant categorization rules** - Edit `config/merchant_categories.csv`
 3. **Configure data sources** - Edit `config/settings.yaml`
 4. **Analyze and fix uncategorized transactions** - Run with `--summary`, then add rules
+5. **Debug configuration issues** - Use `tally diag`
 
 ## Understanding merchant_categories.csv
 
@@ -520,6 +531,36 @@ tally run
 Transaction descriptions look like:
 - AMEX: `"NETFLIX.COM"`, `"UBER *EATS"`, `"STARBUCKS STORE 12345 SEATTLE WA"`
 - BOA: `"NETFLIX.COM DES:RECURRING ID:xxx"`, `"ZELLE TO JOHN DOE"`
+
+### Custom Column Captures (Multi-Column Description)
+
+Some banks split transaction info across multiple columns (e.g., "Card payment" in one column, "STARBUCKS" in another). Use **custom captures** to combine them:
+
+```yaml
+data_sources:
+  - name: European Bank
+    file: data/bank.csv
+    format: "{date:%Y-%m-%d},{_},{txn_type},{vendor},{_},{amount}"
+    columns:
+      description: "{vendor} ({txn_type})"
+```
+
+**How it works:**
+- Use any name (not a reserved name) in the format string: `{txn_type}`, `{vendor}`, etc.
+- The `columns.description` template combines them in any order
+- Reserved names that cannot be used: `{date}`, `{amount}`, `{location}`, `{description}`, `{_}`
+
+**Example CSV:**
+```csv
+Date,PostDate,Type,Recipient,AccountNum,Amount,Balance
+2025-01-15,2025-01-14,Card payment,STARBUCKS COFFEE,PL123,25.50,1500
+```
+
+With the format above, the description becomes: `"STARBUCKS COFFEE (Card payment)"`
+
+**Rules:**
+- Cannot mix `{description}` with custom captures - use one approach
+- If using custom captures, `columns.description` template is required
 
 ## Common Tasks
 
@@ -1550,6 +1591,24 @@ def cmd_diag(args):
                 print(f"     Type: {source['type']}")
             if source.get('format'):
                 print(f"     Format: {source['format']}")
+
+            # Show format spec details if available
+            format_spec = source.get('_format_spec')
+            if format_spec:
+                print(f"     Columns:")
+                print(f"       date: column {format_spec.date_column} (format: {format_spec.date_format})")
+                print(f"       amount: column {format_spec.amount_column}")
+                if format_spec.description_column is not None:
+                    print(f"       description: column {format_spec.description_column}")
+                if format_spec.custom_captures:
+                    for name, col in format_spec.custom_captures.items():
+                        print(f"       {name}: column {col} (custom capture)")
+                if format_spec.description_template:
+                    print(f"     Description template: {format_spec.description_template}")
+                if format_spec.location_column is not None:
+                    print(f"       location: column {format_spec.location_column}")
+                if format_spec.negate_amount:
+                    print(f"     Amount negation: enabled")
             print()
 
     # Merchant rules diagnostics

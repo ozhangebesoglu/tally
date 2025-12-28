@@ -202,3 +202,96 @@ class TestParseGenericCsvDecimalSeparator:
 
                 os.unlink(us_f.name)
                 os.unlink(eu_f.name)
+
+
+class TestCustomCaptures:
+    """Tests for custom column captures with description templates."""
+
+    def test_two_column_capture(self):
+        """Capture two columns and combine with template."""
+        csv_content = """Date,Type,Merchant,Amount
+01/15/2025,Card payment,STARBUCKS COFFEE,25.50
+01/16/2025,Transfer,JOHN SMITH,500.00
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            f.flush()
+
+            rules = get_all_rules()
+            format_spec = parse_format_string(
+                '{date:%m/%d/%Y},{type},{merchant},{amount}',
+                description_template='{merchant} ({type})'
+            )
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 2
+            # Check raw_description contains combined value
+            assert txns[0]['raw_description'] == 'STARBUCKS COFFEE (Card payment)'
+            assert txns[1]['raw_description'] == 'JOHN SMITH (Transfer)'
+
+            os.unlink(f.name)
+
+    def test_template_ordering(self):
+        """Template can reorder captured columns."""
+        csv_content = """Date,First,Second,Amount
+01/15/2025,AAA,BBB,10.00
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            f.flush()
+
+            rules = get_all_rules()
+            # Capture columns as 'first' and 'second', but template puts second first
+            format_spec = parse_format_string(
+                '{date:%m/%d/%Y},{first},{second},{amount}',
+                description_template='{second} - {first}'
+            )
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 1
+            assert txns[0]['raw_description'] == 'BBB - AAA'
+
+            os.unlink(f.name)
+
+    def test_mixed_mode_error(self):
+        """Cannot mix {description} with custom captures."""
+        with pytest.raises(ValueError) as exc_info:
+            parse_format_string('{date},{description},{merchant},{amount}')
+
+        assert 'Cannot mix {description}' in str(exc_info.value)
+
+    def test_custom_captures_require_template(self):
+        """Custom captures without template raises error."""
+        with pytest.raises(ValueError) as exc_info:
+            parse_format_string('{date},{type},{merchant},{amount}')
+
+        assert 'require a description template' in str(exc_info.value)
+
+    def test_template_references_missing_capture(self):
+        """Template referencing non-captured field raises error."""
+        with pytest.raises(ValueError) as exc_info:
+            parse_format_string(
+                '{date},{type},{merchant},{amount}',
+                description_template='{vendor}'  # 'vendor' not captured
+            )
+
+        assert "'{vendor}'" in str(exc_info.value)
+        assert 'not captured' in str(exc_info.value)
+
+    def test_simple_description_still_works(self):
+        """Mode 1 with {description} continues to work."""
+        csv_content = """Date,Description,Amount
+01/15/2025,STARBUCKS COFFEE,25.50
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            f.flush()
+
+            rules = get_all_rules()
+            format_spec = parse_format_string('{date:%m/%d/%Y},{description},{amount}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 1
+            assert txns[0]['raw_description'] == 'STARBUCKS COFFEE'
+
+            os.unlink(f.name)
