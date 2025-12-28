@@ -1,0 +1,54 @@
+name: Test Install Scripts
+
+on:
+  push:
+    paths:
+      - 'docs/install.sh'
+      - 'docs/install.ps1'
+  pull_request:
+    paths:
+      - 'docs/install.sh'
+      - 'docs/install.ps1'
+
+jobs:
+  test-unix:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux
+          - os: macos-15-intel
+            name: macOS Intel
+          - os: macos-latest
+            name: macOS ARM
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run install script
+        run: bash docs/install.sh
+
+      - name: Verify installation
+        run: |
+          ~/.tally/bin/tally version
+          ~/.tally/bin/tally --help
+
+  test-windows:
+    runs-on: windows-latest
+    name: Windows
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run install script
+        shell: pwsh
+        run: |
+          & ./docs/install.ps1
+
+      - name: Verify installation
+        shell: pwsh
+        run: |
+          & "$env:LOCALAPPDATA\tally\tally.exe" version
+          & "$env:LOCALAPPDATA\tally\tally.exe" --help
