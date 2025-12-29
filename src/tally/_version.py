@@ -7,15 +7,21 @@ REPO_URL = "https://github.com/davidfowl/tally"
 def check_for_updates(timeout: float = 2.0) -> dict | None:
     """Check GitHub for a newer version.
 
-    Returns dict with 'latest_version' and 'update_available' keys,
+    Returns dict with 'latest_version', 'update_available', and 'is_prerelease' keys,
     or None if check fails or current version is unknown.
+
+    If running a dev version (e.g., 0.1.156-dev), checks for newer dev builds.
+    Otherwise checks for newer stable releases.
     """
     import urllib.request
     import json
 
-    # Don't check if we're running a dev/unknown version
+    # Don't check if we're running an unknown version
     if VERSION in ("unknown", "dev", "0.1.0"):
         return None
+
+    # Detect if we're on a prerelease version
+    is_prerelease = "-dev" in VERSION
 
     try:
         # Extract owner/repo from REPO_URL
@@ -25,7 +31,11 @@ def check_for_updates(timeout: float = 2.0) -> dict | None:
             return None
         owner, repo = parts[-2], parts[-1]
 
-        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+        # Check prerelease endpoint if running dev version, otherwise stable
+        if is_prerelease:
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/dev"
+        else:
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 
         req = urllib.request.Request(
             api_url,
@@ -42,13 +52,14 @@ def check_for_updates(timeout: float = 2.0) -> dict | None:
             # Remove 'v' prefix if present
             latest_version = latest_tag.lstrip('v')
 
-            # Compare versions (simple string comparison works for our format: 0.1.X)
+            # Compare versions
             update_available = _version_greater(latest_version, VERSION)
 
             return {
                 'latest_version': latest_version,
                 'current_version': VERSION,
                 'update_available': update_available,
+                'is_prerelease': is_prerelease,
                 'release_url': data.get('html_url', f'{REPO_URL}/releases/latest')
             }
     except Exception:
@@ -57,11 +68,18 @@ def check_for_updates(timeout: float = 2.0) -> dict | None:
 
 
 def _version_greater(v1: str, v2: str) -> bool:
-    """Return True if v1 > v2 using semantic versioning comparison."""
+    """Return True if v1 > v2 using semantic versioning comparison.
+
+    Handles -dev suffix: 0.1.100-dev < 0.1.100 (prerelease < release)
+    """
     try:
         def parse_version(v: str) -> tuple:
-            parts = v.split('.')
-            return tuple(int(p) for p in parts[:3])
+            # Split off prerelease suffix (e.g., "0.1.100-dev" -> "0.1.100", "dev")
+            base, _, prerelease = v.partition('-')
+            parts = base.split('.')
+            nums = tuple(int(p) for p in parts[:3])
+            # Prerelease versions sort before release (0 = prerelease, 1 = release)
+            return nums + (0 if prerelease else 1,)
 
         return parse_version(v1) > parse_version(v2)
     except (ValueError, IndexError):
@@ -83,8 +101,12 @@ def get_platform_asset_name() -> str:
         raise RuntimeError(f"Unsupported platform: {system}")
 
 
-def get_latest_release_info(timeout: float = 10.0) -> dict | None:
+def get_latest_release_info(timeout: float = 10.0, prerelease: bool = False) -> dict | None:
     """Get latest release info including download URLs.
+
+    Args:
+        timeout: Request timeout in seconds
+        prerelease: If True, fetch the 'dev' prerelease instead of latest stable
 
     Returns dict with 'version', 'assets' (dict of name -> url), 'release_url',
     or None if request fails.
@@ -98,7 +120,10 @@ def get_latest_release_info(timeout: float = 10.0) -> dict | None:
             return None
         owner, repo = parts[-2], parts[-1]
 
-        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+        if prerelease:
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/dev"
+        else:
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 
         req = urllib.request.Request(
             api_url,

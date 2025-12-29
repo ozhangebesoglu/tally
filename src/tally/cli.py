@@ -1955,10 +1955,13 @@ def cmd_diag(args):
 
 def cmd_update(args):
     """Handle the update command."""
-    print("Checking for updates...")
+    if args.prerelease:
+        print("Checking for development builds...")
+    else:
+        print("Checking for updates...")
 
     # Get release info (may fail if offline or rate-limited)
-    release_info = get_latest_release_info()
+    release_info = get_latest_release_info(prerelease=args.prerelease)
     has_update = False
 
     if release_info:
@@ -1970,16 +1973,25 @@ def cmd_update(args):
         has_update = _version_greater(latest, current)
 
         if has_update:
-            print(f"New version available: v{latest} (current: v{current})")
+            if args.prerelease:
+                print(f"Development build available: v{latest} (current: v{current})")
+            else:
+                print(f"New version available: v{latest} (current: v{current})")
         else:
             print(f"Already on latest version: v{current}")
     else:
-        print("Could not check for version updates (network issue?)")
+        if args.prerelease:
+            print("No development build found. Dev builds are created on each push to main.")
+        else:
+            print("Could not check for version updates (network issue?)")
 
     # If --check only, just show status and exit
     if args.check:
         if has_update:
-            print(f"\nRun 'tally update' to install the update.")
+            if args.prerelease:
+                print(f"\nRun 'tally update --prerelease' to install the development build.")
+            else:
+                print(f"\nRun 'tally update' to install the update.")
         sys.exit(0)
 
     # Check for migrations (layout updates, etc.)
@@ -2604,6 +2616,11 @@ Examples:
         action='store_true',
         help='Skip confirmation prompts for asset updates'
     )
+    update_parser.add_argument(
+        '--prerelease',
+        action='store_true',
+        help='Install latest development build from main branch'
+    )
 
     args = parser.parse_args()
 
@@ -2616,8 +2633,12 @@ Examples:
         update_info = check_for_updates()
         if update_info and update_info.get('update_available'):
             print()
-            print(f"Update available: v{update_info['latest_version']} (current: v{update_info['current_version']})")
-            print(f"  Run 'tally update' to install")
+            if update_info.get('is_prerelease'):
+                print(f"Dev build available: v{update_info['latest_version']} (current: v{update_info['current_version']})")
+                print(f"  Run 'tally update --prerelease' to install")
+            else:
+                print(f"Update available: v{update_info['latest_version']} (current: v{update_info['current_version']})")
+                print(f"  Run 'tally update' to install")
 
         sys.exit(0)
 
@@ -2643,8 +2664,12 @@ Examples:
         update_info = check_for_updates()
         if update_info and update_info.get('update_available'):
             print()
-            print(f"Update available: v{update_info['latest_version']}")
-            print(f"  Run 'tally update' to install")
+            if update_info.get('is_prerelease'):
+                print(f"Dev build available: v{update_info['latest_version']}")
+                print(f"  Run 'tally update --prerelease' to install")
+            else:
+                print(f"Update available: v{update_info['latest_version']}")
+                print(f"  Run 'tally update' to install")
     elif args.command == 'update':
         cmd_update(args)
 

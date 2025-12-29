@@ -1,5 +1,10 @@
 # Tally installer script for Windows
-# Usage: irm https://raw.githubusercontent.com/davidfowl/tally/main/install.ps1 | iex
+# Usage: irm https://tallyai.money/install.ps1 | iex
+# Usage: iex "& { $(irm https://tallyai.money/install.ps1) } -Prerelease"
+
+param(
+    [switch]$Prerelease
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -10,15 +15,29 @@ function Write-Info { param($msg) Write-Host "==> " -ForegroundColor Green -NoNe
 function Write-Warn { param($msg) Write-Host "warning: " -ForegroundColor Yellow -NoNewline; Write-Host $msg }
 function Write-Err { param($msg) Write-Host "error: " -ForegroundColor Red -NoNewline; Write-Host $msg; exit 1 }
 
-Write-Info "Installing tally..."
+if ($Prerelease) {
+    Write-Info "Installing tally (development build)..."
+} else {
+    Write-Info "Installing tally..."
+}
 
-# Get latest version
+# Get release version
 try {
-    $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
-    $Version = $Release.tag_name
-    Write-Info "Latest version: $Version"
+    if ($Prerelease) {
+        $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/dev"
+        $Version = $Release.tag_name
+        Write-Info "Development build: $Version"
+    } else {
+        $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
+        $Version = $Release.tag_name
+        Write-Info "Latest version: $Version"
+    }
 } catch {
-    Write-Err "Could not determine latest version. Check https://github.com/$Repo/releases"
+    if ($Prerelease) {
+        Write-Err "No development build found. Dev builds are created on each push to main."
+    } else {
+        Write-Err "Could not determine latest version. Check https://github.com/$Repo/releases"
+    }
 }
 
 # Download

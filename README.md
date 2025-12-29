@@ -155,6 +155,25 @@ Netflix → Monthly
 - `tally diag --format json` - Debug configuration
 - `tally inspect <file>` - Analyze CSV format
 
+## Development Builds
+
+Get the latest build from main branch:
+
+```bash
+# Install dev build
+tally update --prerelease
+
+# Fresh install (dev)
+curl -fsSL https://tallyai.money/install.sh | bash -s -- --prerelease
+```
+
+```powershell
+# Windows (dev)
+iex "& { $(irm https://tallyai.money/install.ps1) } -Prerelease"
+```
+
+Dev builds are created automatically on every push to main. When running a dev version, `tally version` will notify you of newer dev builds.
+
 ## License
 
 MIT

@@ -3,10 +3,12 @@ set -e
 
 # Tally installer script
 # Usage: curl -fsSL https://raw.githubusercontent.com/davidfowl/tally/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/davidfowl/tally/main/install.sh | bash -s -- --prerelease
 
 REPO="davidfowl/tally"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.tally/bin}"
 TMPDIR="${TMPDIR:-/tmp}"
+PRERELEASE=false
 
 # Colors
 RED='\033[0;31m'
@@ -17,6 +19,19 @@ NC='\033[0m' # No Color
 info() { echo -e "${GREEN}==>${NC} $1"; }
 warn() { echo -e "${YELLOW}warning:${NC} $1"; }
 error() { echo -e "${RED}error:${NC} $1" >&2; exit 1; }
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -p|--prerelease)
+            PRERELEASE=true
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
 
 # Detect OS
 detect_os() {
@@ -36,27 +51,47 @@ detect_arch() {
     esac
 }
 
-# Get latest release version
-get_latest_version() {
-    curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
-        grep '"tag_name":' |
-        sed -E 's/.*"([^"]+)".*/\1/'
+# Get release version (latest stable or dev prerelease)
+get_release_version() {
+    if [ "$PRERELEASE" = true ]; then
+        # Get dev prerelease by tag
+        curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/dev" |
+            grep '"tag_name":' |
+            sed -E 's/.*"([^"]+)".*/\1/'
+    else
+        # Get latest stable release
+        curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
+            grep '"tag_name":' |
+            sed -E 's/.*"([^"]+)".*/\1/'
+    fi
 }
 
 main() {
-    info "Installing tally..."
+    if [ "$PRERELEASE" = true ]; then
+        info "Installing tally (development build)..."
+    else
+        info "Installing tally..."
+    fi
 
     OS=$(detect_os)
     ARCH=$(detect_arch)
 
     info "Detected: ${OS}-${ARCH}"
 
-    # Get latest version
-    VERSION=$(get_latest_version)
+    # Get release version
+    VERSION=$(get_release_version)
     if [ -z "$VERSION" ]; then
-        error "Could not determine latest version. Check https://github.com/${REPO}/releases"
+        if [ "$PRERELEASE" = true ]; then
+            error "No development build found. Dev builds are created on each push to main."
+        else
+            error "Could not determine latest version. Check https://github.com/${REPO}/releases"
+        fi
     fi
-    info "Latest version: ${VERSION}"
+    if [ "$PRERELEASE" = true ]; then
+        info "Development build: ${VERSION}"
+    else
+        info "Latest version: ${VERSION}"
+    fi
 
     # Download URL
     FILENAME="tally-${OS}-${ARCH}.zip"

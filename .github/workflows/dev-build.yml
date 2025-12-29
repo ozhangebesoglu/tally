@@ -1,0 +1,56 @@
+name: Dev Build
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        run: echo "version=0.1.$(git rev-list --count HEAD)-dev" >> $GITHUB_OUTPUT
+
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Delete existing dev release
+        run: gh release delete dev --cleanup-tag --yes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create dev release
+        run: |
+          gh release create dev \
+            --title "Development Build (${{ needs.prepare.outputs.version }})" \
+            --notes "Latest build from main branch
+
+          **Version:** ${{ needs.prepare.outputs.version }}
+          **Commit:** ${{ github.sha }}
+
+          Install: \`tally update --prerelease\`" \
+            --prerelease \
+            artifacts/*/*.zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
