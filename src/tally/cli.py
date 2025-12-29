@@ -978,7 +978,7 @@ def get_schema_version(config_dir):
     schema_file = os.path.join(config_dir, '.tally-schema')
     if os.path.exists(schema_file):
         try:
-            with open(schema_file) as f:
+            with open(schema_file, encoding='utf-8') as f:
                 return int(f.read().strip())
         except (ValueError, IOError):
             return 0
@@ -1064,7 +1064,7 @@ def migrate_v0_to_v1(old_config_dir, skip_confirm=False):
 
         # Write schema version marker
         schema_file = os.path.join(new_config, '.tally-schema')
-        with open(schema_file, 'w') as f:
+        with open(schema_file, 'w', encoding='utf-8') as f:
             f.write('1\n')
 
         print("✓ Migrated to ./tally/")

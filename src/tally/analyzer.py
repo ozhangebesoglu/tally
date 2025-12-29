@@ -1430,11 +1430,11 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
 
     # Load external CSS and JavaScript files for embedding
     css_file_path = Path(__file__).parent / 'spending_report.css'
-    with open(css_file_path, 'r') as f:
+    with open(css_file_path, 'r', encoding='utf-8') as f:
         spending_report_css = f.read()
 
     js_file_path = Path(__file__).parent / 'spending_report.js'
-    with open(js_file_path, 'r') as f:
+    with open(js_file_path, 'r', encoding='utf-8') as f:
         spending_report_js = f.read()
 
     # Local helpers for currency formatting
