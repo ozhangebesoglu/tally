@@ -510,11 +510,11 @@ def cmd_init(args):
      {C.DIM}Or any agent that can run command-line tools.{C.RESET}
 
   {C.BOLD}3.{C.RESET} Tell the agent what to do:
-     {C.DIM}• "Configure my Chase credit card CSV for tally"
-     • "Run tally and categorize all my transactions"
-     • "Generate my spending report"{C.RESET}
+     {C.DIM}• "Use tally to configure my Chase credit card CSV"{C.RESET}
+     {C.DIM}• "Use tally to categorize all my transactions"{C.RESET}
+     {C.DIM}• "Use tally to generate my spending report"{C.RESET}
 
-{C.DIM}The agent can run {C.RESET}{C.GREEN}tally workflow{C.RESET}{C.DIM} at any time to see context-aware instructions.{C.RESET}
+{C.DIM}The agent can run {C.RESET}{C.GREEN}tally workflow{C.RESET}{C.DIM} at any time to see the next steps.{C.RESET}
 """)
 
 
