@@ -27,9 +27,8 @@ uv tool install git+https://github.com/davidfowl/tally
 
 ```bash
 tally init ./my-budget      # Create budget folder
-# Add bank exports to my-budget/data/
-# Edit my-budget/config/settings.yaml
-tally run                    # Generate spending report
+cd my-budget
+tally workflow              # See next steps
 ```
 
 ## Commands
@@ -37,6 +36,7 @@ tally run                    # Generate spending report
 | Command | Description |
 |---------|-------------|
 | `tally init [dir]` | Set up a new budget folder |
+| `tally workflow` | Show next steps (detects setup state, unknown merchants) |
 | `tally run` | Parse transactions and generate HTML report |
 | `tally run --format json` | Output analysis as JSON with reasoning |
 | `tally explain` | Explain why merchants are classified the way they are |
@@ -139,31 +139,22 @@ Patterns are Python regex (case-insensitive). First match wins.
 
 ## For AI Agents
 
-Run `tally init` to generate `AGENTS.md` with detailed instructions. Key commands:
+Run `tally workflow` at any time to see context-aware instructions:
 
-**Analysis & Reasoning:**
+```bash
+tally workflow    # Shows next steps based on current state
+```
+
+The workflow command detects your setup state and shows relevant instructions:
+- No config? → How to initialize
+- No data sources? → How to configure them
+- Unknown merchants? → Categorization workflow
+
+**Key commands for agents:**
+- `tally discover --format json` - Get unknown merchants with suggested patterns
 - `tally run --format json -v` - Full analysis with classification reasoning
-- `tally explain <merchant>` - Why a specific merchant is classified
-- `tally explain <merchant> -vv` - Full details including which rule matched
-- `tally explain --classification variable` - Explain all variable merchants
-
-**Example: tally explain -vv Output:**
-```
-Netflix → Monthly
-  Monthly: Subscriptions appears 6/6 months (50% threshold = 3)
-
-  Decision trace:
-    ✗ NOT excluded: Subscriptions not in [Transfers, Cash, Income]
-    ✓ IS monthly: Subscriptions with 6/6 months (>= 3 bill threshold)
-
-  Calculation: avg (CV=0.00 (<0.3), payments are consistent)
-  Rule: NETFLIX.* (user)   # Shows which pattern matched
-```
-
-**Discovery & Debugging:**
-- `tally discover --format json` - Structured unknown merchant data
-- `tally diag --format json` - Debug configuration
-- `tally inspect <file>` - Analyze CSV format
+- `tally explain <merchant> -vv` - Why a merchant is classified (with rule info)
+- `tally diag --format json` - Debug configuration issues
 
 ## Development Builds
 
