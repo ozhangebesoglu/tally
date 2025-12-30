@@ -26,6 +26,18 @@ def _supports_color():
     term = os.environ.get('TERM', '')
     return term != 'dumb'
 
+def _setup_windows_encoding():
+    """Set UTF-8 encoding on Windows to support Unicode output."""
+    if sys.platform == 'win32':
+        try:
+            # Try to set UTF-8 mode
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, OSError):
+            pass  # Older Python or not supported
+
+_setup_windows_encoding()
+
 class _Colors:
     """ANSI color codes with automatic detection."""
     def __init__(self):

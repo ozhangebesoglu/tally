@@ -26,8 +26,8 @@ try {
     if (-not (Test-Path "tally/config/settings.yaml")) {
         throw "settings.yaml not found"
     }
-    if (-not (Test-Path "tally/AGENTS.md")) {
-        throw "AGENTS.md not found"
+    if (-not (Test-Path "tally/config/merchant_categories.csv")) {
+        throw "merchant_categories.csv not found"
     }
     Write-Host "✓ Init created expected files" -ForegroundColor Green
 
