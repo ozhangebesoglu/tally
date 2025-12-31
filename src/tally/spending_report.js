@@ -24,6 +24,7 @@ createApp({
         const chartsCollapsed = ref(false);
         const helpCollapsed = ref(true);
         const showExcluded = ref(false); // Toggle for excluded transactions (income/credits)
+        const currentView = ref('category'); // 'category' or 'section'
 
         // Chart refs
         const monthlyChart = ref(null);
@@ -149,6 +150,54 @@ createApp({
             );
         });
 
+        // Check if sections are defined
+        const hasSections = computed(() => {
+            const sections = spendingData.value.sections || {};
+            return Object.keys(sections).length > 0;
+        });
+
+        // Section view with filtering applied (for By Section tab)
+        const filteredSectionView = computed(() => {
+            const sections = spendingData.value.sections || {};
+            const result = {};
+
+            for (const [sectionId, section] of Object.entries(sections)) {
+                const filteredMerchants = {};
+                let sectionTotal = 0;
+
+                for (const [merchantId, merchant] of Object.entries(section.merchants || {})) {
+                    // Filter transactions
+                    const filteredTxns = (merchant.transactions || []).filter(txn =>
+                        passesFilters(txn, merchant)
+                    );
+
+                    if (filteredTxns.length > 0) {
+                        const filteredTotal = filteredTxns.reduce((sum, t) => sum + t.amount, 0);
+                        const months = new Set(filteredTxns.map(t => t.month));
+
+                        filteredMerchants[merchantId] = {
+                            ...merchant,
+                            filteredTxns,
+                            filteredTotal,
+                            filteredCount: filteredTxns.length,
+                            filteredMonths: months.size
+                        };
+                        sectionTotal += filteredTotal;
+                    }
+                }
+
+                if (Object.keys(filteredMerchants).length > 0) {
+                    result[sectionId] = {
+                        ...section,
+                        filteredMerchants,
+                        filteredTotal: sectionTotal
+                    };
+                }
+            }
+
+            return result;
+        });
+
         // Totals per section
         const sectionTotals = computed(() => {
             const totals = {};
@@ -159,10 +208,12 @@ createApp({
             return totals;
         });
 
-        // Grand total
-        const grandTotal = computed(() =>
-            Object.values(sectionTotals.value).reduce((sum, t) => sum + t, 0)
-        );
+        // Grand total (from category view to avoid double-counting across sections)
+        const grandTotal = computed(() => {
+            // Sum totals from category view (unique merchants only)
+            return Object.values(filteredCategoryView.value)
+                .reduce((sum, cat) => sum + (cat.filteredTotal || 0), 0);
+        });
 
         // Uncategorized total
         const uncategorizedTotal = computed(() => {
@@ -320,25 +371,35 @@ createApp({
             const items = [];
             const data = spendingData.value;
 
-            // Merchants
-            for (const section of Object.values(data.sections || {})) {
-                for (const [id, merchant] of Object.entries(section.merchants || {})) {
-                    items.push({
-                        type: 'merchant',
-                        filterText: id,
-                        displayText: merchant.displayName,
-                        id: `m:${id}`
-                    });
+            // Use categoryView for unique merchants (avoids duplicates from overlapping sections)
+            const categoryView = data.categoryView || {};
+            const seenMerchants = new Set();
+
+            for (const category of Object.values(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    for (const [id, merchant] of Object.entries(subcat.merchants || {})) {
+                        if (!seenMerchants.has(id)) {
+                            seenMerchants.add(id);
+                            items.push({
+                                type: 'merchant',
+                                filterText: id,
+                                displayText: merchant.displayName,
+                                id: `m:${id}`
+                            });
+                        }
+                    }
                 }
             }
 
             // Categories (unique)
             const categories = new Set();
             const subcategories = new Set();
-            for (const section of Object.values(data.sections || {})) {
-                for (const merchant of Object.values(section.merchants || {})) {
-                    categories.add(merchant.category);
-                    subcategories.add(merchant.subcategory);
+            for (const category of Object.values(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    for (const merchant of Object.values(subcat.merchants || {})) {
+                        categories.add(merchant.category);
+                        subcategories.add(merchant.subcategory);
+                    }
                 }
             }
             categories.forEach(c => items.push({
@@ -354,10 +415,12 @@ createApp({
 
             // Locations (unique)
             const locations = new Set();
-            for (const section of Object.values(data.sections || {})) {
-                for (const merchant of Object.values(section.merchants || {})) {
-                    for (const txn of merchant.transactions || []) {
-                        if (txn.location) locations.add(txn.location);
+            for (const category of Object.values(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    for (const merchant of Object.values(subcat.merchants || {})) {
+                        for (const txn of merchant.transactions || []) {
+                            if (txn.location) locations.add(txn.location);
+                        }
                     }
                 }
             }
@@ -367,9 +430,11 @@ createApp({
 
             // Tags (unique across all merchants)
             const tags = new Set();
-            for (const section of Object.values(data.sections || {})) {
-                for (const merchant of Object.values(section.merchants || {})) {
-                    (merchant.tags || []).forEach(t => tags.add(t));
+            for (const category of Object.values(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    for (const merchant of Object.values(subcat.merchants || {})) {
+                        (merchant.tags || []).forEach(t => tags.add(t));
+                    }
                 }
             }
             tags.forEach(t => items.push({
@@ -898,12 +963,13 @@ createApp({
             // State
             activeFilters, expandedMerchants, collapsedSections, searchQuery,
             showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed, helpCollapsed,
-            showIncome, showTransfers,
+            showIncome, showTransfers, currentView,
             // Refs
             monthlyChart, categoryPieChart, categoryByMonthChart,
             // Computed
             spendingData, title, subtitle,
-            visibleSections, filteredCategoryView, sectionTotals, grandTotal, uncategorizedTotal,
+            visibleSections, filteredCategoryView, filteredSectionView, hasSections,
+            sectionTotals, grandTotal, uncategorizedTotal,
             numFilteredMonths, filteredAutocomplete, availableMonths,
             // Cash flow
             incomeTotal, incomeCount, groupedIncome, expandedIncome,

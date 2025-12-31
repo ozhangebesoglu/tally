@@ -92,6 +92,7 @@ from .analyzer import (
     auto_detect_csv_format,
     analyze_transactions,
     print_summary,
+    print_sections_summary,
     write_summary_file,
     write_summary_file_vue,
 )
@@ -709,16 +710,36 @@ def cmd_run(args):
     # Analyze
     stats = analyze_transactions(all_txns)
 
+    # Classify by user-defined sections
+    sections_config = config.get('sections')
+    if sections_config:
+        from .analyzer import classify_by_sections, compute_section_totals
+        section_results = classify_by_sections(
+            stats['by_merchant'],
+            sections_config,
+            stats['num_months']
+        )
+        # Compute totals for each section
+        stats['sections'] = {
+            name: compute_section_totals(merchants)
+            for name, merchants in section_results.items()
+        }
+        stats['_sections_config'] = sections_config
+
     # Parse filter options
     only_filter = None
     if args.only:
-        valid_classifications = {'monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable'}
-        only_filter = [c.strip() for c in args.only.split(',')]
-        invalid = [c for c in only_filter if c not in valid_classifications]
+        # Get valid section names from sections config
+        valid_sections = set()
+        if sections_config:
+            valid_sections = {s.name.lower() for s in sections_config.sections}
+        only_filter = [c.strip().lower() for c in args.only.split(',')]
+        invalid = [c for c in only_filter if c not in valid_sections]
         if invalid:
-            print(f"Warning: Invalid classification(s) ignored: {', '.join(invalid)}", file=sys.stderr)
-            print(f"  Valid options: {', '.join(sorted(valid_classifications))}", file=sys.stderr)
-            only_filter = [c for c in only_filter if c in valid_classifications]
+            print(f"Warning: Invalid section(s) ignored: {', '.join(invalid)}", file=sys.stderr)
+            if valid_sections:
+                print(f"  Valid sections: {', '.join(sorted(valid_sections))}", file=sys.stderr)
+            only_filter = [c for c in only_filter if c in valid_sections]
             if not only_filter:
                 only_filter = None
     category_filter = args.category if hasattr(args, 'category') and args.category else None
@@ -739,12 +760,18 @@ def cmd_run(args):
         print(export_markdown(stats, verbose=verbose, only=only_filter, category_filter=category_filter))
     elif output_format == 'summary' or args.summary:
         # Text summary only (no HTML)
-        print_summary(stats, year=year, currency_format=currency_format)
+        if stats.get('sections'):
+            print_sections_summary(stats, year=year, currency_format=currency_format, only_filter=only_filter)
+        else:
+            print_summary(stats, year=year, currency_format=currency_format)
     else:
         # HTML output (default)
         # Print summary first
         if not args.quiet:
-            print_summary(stats, year=year, currency_format=currency_format)
+            if stats.get('sections'):
+                print_sections_summary(stats, year=year, currency_format=currency_format, only_filter=only_filter)
+            else:
+                print_summary(stats, year=year, currency_format=currency_format)
 
         # Determine output path
         if args.output:
@@ -1545,6 +1572,57 @@ def cmd_diag(args):
     print(f"Total rules: {diag['total_rules']}")
     print()
 
+    # Classification rules (occurrence-based analysis)
+    print("CLASSIFICATION RULES")
+    print("-" * 70)
+    rules_file = os.path.join(config_dir, 'classification_rules.txt')
+    print(f"Classification rules file: {rules_file}")
+    print(f"  Exists: {os.path.exists(rules_file)}")
+    if os.path.exists(rules_file):
+        # Count non-comment lines
+        with open(rules_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            rule_lines = [l for l in lines if l.strip() and not l.strip().startswith('#')]
+            print(f"  Active rules: {len(rule_lines)}")
+        print()
+        print("  Rules (determines bucket and calc_type after categorization):")
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#'):
+                print(f"    {stripped}")
+    else:
+        print("  Not found - will be created with defaults on first 'tally run'")
+    print()
+
+    # Sections configuration
+    print("SECTIONS")
+    print("-" * 70)
+    sections_file = os.path.join(config_dir, 'sections.txt')
+    print(f"Sections file: {sections_file}")
+    print(f"  Exists: {os.path.exists(sections_file)}")
+    if os.path.exists(sections_file):
+        try:
+            from .section_engine import load_sections
+            sections_config = load_sections(sections_file)
+            print(f"  Sections defined: {len(sections_config.sections)}")
+            if sections_config.global_variables:
+                print()
+                print("  Global variables:")
+                for name, expr in sections_config.global_variables.items():
+                    print(f"    {name} = {expr}")
+            print()
+            print("  Sections:")
+            for section in sections_config.sections:
+                print(f"    [{section.name}]")
+                if section.description:
+                    print(f"      description: {section.description}")
+                print(f"      filter: {section.filter_expr}")
+        except Exception as e:
+            print(f"  Error loading sections: {e}")
+    else:
+        print("  Not found - will be created with defaults on first 'tally run'")
+    print()
+
     # JSON output option
     if args.format == 'json':
         print("JSON OUTPUT")
@@ -1905,12 +1983,18 @@ def cmd_explain(args):
     # Analyze
     stats = analyze_transactions(all_txns)
 
-    # Get all merchants from all classifications
-    all_merchants = {}
-    for section in ['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable']:
-        merchants_dict = stats.get(f'{section}_merchants', {})
-        for name, data in merchants_dict.items():
-            all_merchants[name] = data
+    # Get all merchants from by_merchant (the unified view)
+    all_merchants = stats.get('by_merchant', {})
+
+    # Load sections config for section matching
+    sections_config = None
+    sections_file = os.path.join(config_dir, 'sections.txt')
+    if os.path.exists(sections_file):
+        try:
+            from .section_engine import load_sections
+            sections_config = load_sections(sections_file)
+        except Exception:
+            pass  # Sections are optional
 
     verbose = args.verbose
 
@@ -1922,13 +2006,13 @@ def cmd_explain(args):
             # Try exact match first
             if merchant_query in all_merchants:
                 found_any = True
-                _print_merchant_explanation(merchant_query, all_merchants[merchant_query], args.format, verbose, stats['num_months'])
+                _print_merchant_explanation(merchant_query, all_merchants[merchant_query], args.format, verbose, stats['num_months'], sections_config)
             else:
                 # Try case-insensitive match
                 matches = [m for m in all_merchants.keys() if m.lower() == merchant_query.lower()]
                 if matches:
                     found_any = True
-                    _print_merchant_explanation(matches[0], all_merchants[matches[0]], args.format, verbose, stats['num_months'])
+                    _print_merchant_explanation(matches[0], all_merchants[matches[0]], args.format, verbose, stats['num_months'], sections_config)
                     continue
 
                 # Try substring match on merchant names (partial search)
@@ -1938,7 +2022,7 @@ def cmd_explain(args):
                     found_any = True
                     print(f"Merchants matching '{merchant_query}':\n")
                     for m in sorted(partial_matches):
-                        _print_merchant_explanation(m, all_merchants[m], args.format, verbose, stats['num_months'])
+                        _print_merchant_explanation(m, all_merchants[m], args.format, verbose, stats['num_months'], sections_config)
                     continue
 
                 # Search transactions containing the query
@@ -1991,87 +2075,98 @@ def cmd_explain(args):
         if not found_any:
             sys.exit(1)
 
-    elif args.classification:
-        # Show all merchants in a specific classification
-        section = args.classification
-        merchants_dict = stats.get(f'{section}_merchants', {})
-        if not merchants_dict:
-            print(f"No merchants in classification '{section}'")
-            sys.exit(0)
+    elif hasattr(args, 'section') and args.section:
+        # Show all merchants in a specific section
+        section_name = args.section
+        sections_config = config.get('sections')
+
+        # Classify by sections
+        if sections_config:
+            from .analyzer import classify_by_sections, compute_section_totals
+            section_results = classify_by_sections(
+                stats['by_merchant'],
+                sections_config,
+                stats['num_months']
+            )
+
+            # Find the matching section (case-insensitive)
+            section_match = None
+            for name in section_results.keys():
+                if name.lower() == section_name.lower():
+                    section_match = name
+                    break
+
+            if not section_match:
+                valid_sections = [s.name for s in sections_config.sections]
+                print(f"No section '{section_name}' found.", file=sys.stderr)
+                print(f"Available sections: {', '.join(valid_sections)}", file=sys.stderr)
+                sys.exit(1)
+
+            merchants_list = section_results[section_match]
+            if not merchants_list:
+                print(f"No merchants in section '{section_match}'")
+                sys.exit(0)
+
+            if args.format == 'json':
+                import json
+                merchants = [build_merchant_json(name, data, verbose) for name, data in merchants_list]
+                merchants.sort(key=lambda x: x['monthly_value'], reverse=True)
+                print(json.dumps({'section': section_match, 'merchants': merchants}, indent=2))
+            else:
+                # Text format
+                merchants_dict = {name: data for name, data in merchants_list}
+                _print_classification_summary(section_match, merchants_dict, verbose, stats['num_months'])
+        else:
+            print("No sections.txt found. Run 'tally run' first to generate default sections.")
+            sys.exit(1)
+
+    elif args.category:
+        # Filter by category
+        by_merchant = stats.get('by_merchant', {})
+        matching_merchants = {k: v for k, v in by_merchant.items() if v.get('category') == args.category}
 
         if args.format == 'json':
             import json
-            merchants = [build_merchant_json(name, data, verbose) for name, data in merchants_dict.items()]
+            merchants = [build_merchant_json(name, data, verbose) for name, data in matching_merchants.items()]
             merchants.sort(key=lambda x: x['monthly_value'], reverse=True)
-            print(json.dumps({'classification': section, 'merchants': merchants}, indent=2))
-        elif args.format == 'markdown':
-            print(export_markdown(stats, verbose=verbose, only=[section], category_filter=args.category))
+            print(json.dumps({'category': args.category, 'merchants': merchants}, indent=2))
         else:
             # Text format
-            _print_classification_summary(section, merchants_dict, verbose, stats['num_months'])
-
-    elif args.category:
-        # Filter by category across all classifications
-        if args.format == 'json':
-            print(export_json(stats, verbose=verbose, category_filter=args.category))
-        elif args.format == 'markdown':
-            print(export_markdown(stats, verbose=verbose, category_filter=args.category))
-        else:
-            # Text format - show all merchants in category
-            print(f"Merchants in category: {args.category}\n")
-            found_any = False
-            for section in ['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable']:
-                merchants_dict = stats.get(f'{section}_merchants', {})
-                section_merchants = {k: v for k, v in merchants_dict.items() if v.get('category') == args.category}
-                if section_merchants:
-                    found_any = True
-                    _print_classification_summary(section, section_merchants, verbose, stats['num_months'])
-            if not found_any:
+            if matching_merchants:
+                print(f"Merchants in category: {args.category}\n")
+                _print_classification_summary(args.category, matching_merchants, verbose, stats['num_months'])
+            else:
                 # Suggest categories that do exist
-                all_categories = set()
-                for section in ['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable']:
-                    for data in stats.get(f'{section}_merchants', {}).values():
-                        if data.get('category'):
-                            all_categories.add(data['category'])
+                all_categories = set(v.get('category') for v in by_merchant.values() if v.get('category'))
                 print(f"No merchants found in category '{args.category}'")
                 if all_categories:
                     print(f"\nAvailable categories: {', '.join(sorted(all_categories))}")
 
     elif hasattr(args, 'tags') and args.tags:
-        # Filter by tags across all classifications
+        # Filter by tags
         filter_tags = set(t.strip().lower() for t in args.tags.split(','))
+        by_merchant = stats.get('by_merchant', {})
+
+        matching_merchants = {
+            k: v for k, v in by_merchant.items()
+            if set(t.lower() for t in v.get('tags', [])) & filter_tags
+        }
 
         if args.format == 'json':
-            # Filter merchants by tags and output JSON
             import json
-            from .analyzer import build_merchant_json
-            matched_merchants = []
-            for section in ['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable']:
-                for name, data in stats.get(f'{section}_merchants', {}).items():
-                    merchant_tags = set(t.lower() for t in data.get('tags', []))
-                    if merchant_tags & filter_tags:
-                        matched_merchants.append(build_merchant_json(name, data, verbose))
-            matched_merchants.sort(key=lambda x: x['monthly_value'], reverse=True)
-            print(json.dumps({'tags': list(filter_tags), 'merchants': matched_merchants}, indent=2))
+            merchants = [build_merchant_json(name, data, verbose) for name, data in matching_merchants.items()]
+            merchants.sort(key=lambda x: x['monthly_value'], reverse=True)
+            print(json.dumps({'tags': list(filter_tags), 'merchants': merchants}, indent=2))
         else:
-            # Text format - show all merchants with tags
-            print(f"Merchants with tags: {', '.join(sorted(filter_tags))}\n")
-            found_any = False
-            for section in ['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable']:
-                merchants_dict = stats.get(f'{section}_merchants', {})
-                section_merchants = {
-                    k: v for k, v in merchants_dict.items()
-                    if set(t.lower() for t in v.get('tags', [])) & filter_tags
-                }
-                if section_merchants:
-                    found_any = True
-                    _print_classification_summary(section, section_merchants, verbose, stats['num_months'])
-            if not found_any:
+            # Text format
+            if matching_merchants:
+                print(f"Merchants with tags: {', '.join(sorted(filter_tags))}\n")
+                _print_classification_summary('Tagged', matching_merchants, verbose, stats['num_months'])
+            else:
                 # Suggest tags that do exist
                 all_tags = set()
-                for section in ['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable']:
-                    for data in stats.get(f'{section}_merchants', {}).values():
-                        all_tags.update(data.get('tags', []))
+                for data in by_merchant.values():
+                    all_tags.update(data.get('tags', []))
                 print(f"No merchants found with tags: {', '.join(sorted(filter_tags))}")
                 if all_tags:
                     print(f"\nAvailable tags: {', '.join(sorted(all_tags))}")
@@ -2134,13 +2229,91 @@ def _print_description_explanation(query, trace, output_format, verbose):
         print()
 
 
-def _print_merchant_explanation(name, data, output_format, verbose, num_months):
+def _get_matching_sections(data, sections_config, num_months):
+    """Evaluate which sections a merchant matches and return details."""
+    if not sections_config:
+        return []
+
+    from datetime import datetime
+    from .section_engine import evaluate_section_filter, evaluate_variables
+
+    # Calculate primitives
+    months_active = data.get('months_active', 1)
+    total = data.get('total', 0)
+    cv = data.get('cv', 0)
+    category = data.get('category', '')
+    subcategory = data.get('subcategory', '')
+    tags = list(data.get('tags', []))
+
+    # Use actual transactions if available, otherwise build synthetic ones
+    existing_txns = data.get('transactions', [])
+    if existing_txns:
+        # Use real transactions - they already have proper month info
+        transactions = []
+        for txn in existing_txns:
+            transactions.append({
+                'amount': txn['amount'],
+                'date': datetime.strptime(txn['month'] + '-15', '%Y-%m-%d'),
+                'category': category,
+                'subcategory': subcategory,
+                'tags': tags,
+            })
+    else:
+        # Build synthetic transactions with dates spread across months_active
+        payments = data.get('payments', [])
+        transactions = []
+        for i, p in enumerate(payments):
+            # Spread across different months so get_months() works
+            month_offset = i % max(1, months_active)
+            transactions.append({
+                'amount': p,
+                'date': datetime(2025, max(1, min(12, month_offset + 1)), 15),
+                'category': category,
+                'subcategory': subcategory,
+                'tags': tags,
+            })
+
+    # Evaluate global variables
+    global_vars = evaluate_variables(
+        sections_config.global_variables,
+        transactions,
+        num_months
+    )
+
+    matches = []
+    for section in sections_config.sections:
+        if evaluate_section_filter(section, transactions, num_months, global_vars):
+            # Build context values for display
+            context = {
+                'months': months_active,
+                'total': total,
+                'cv': round(cv, 2),
+                'category': category,
+                'subcategory': subcategory,
+                'tags': tags,
+            }
+            matches.append({
+                'name': section.name,
+                'filter': section.filter_expr,
+                'description': section.description,
+                'context': context,
+            })
+
+    return matches
+
+
+def _print_merchant_explanation(name, data, output_format, verbose, num_months, sections_config=None):
     """Print explanation for a single merchant."""
     import json
     from .analyzer import build_merchant_json
 
+    # Get matching sections
+    matching_sections = _get_matching_sections(data, sections_config, num_months)
+
     if output_format == 'json':
-        print(json.dumps(build_merchant_json(name, data, verbose), indent=2))
+        merchant_json = build_merchant_json(name, data, verbose)
+        merchant_json['sections'] = matching_sections
+        print(json.dumps(merchant_json, indent=2))
     elif output_format == 'markdown':
         reasoning = data.get('reasoning', {})
         print(f"## {name}")
@@ -2150,6 +2323,11 @@ def _print_merchant_explanation(name, data, output_format, verbose, num_months):
         print(f"**Monthly Value:** ${data.get('monthly_value', 0):.2f}")
         print(f"**YTD Total:** ${data.get('total', 0):.2f}")
         print(f"**Months Active:** {data.get('months_active', 0)}/{num_months}")
+
+        if matching_sections:
+            print(f"\n**Sections ({len(matching_sections)}):**")
+            for section in matching_sections:
+                print(f"  - **{section['name']}**: `{section['filter']}`")
 
         if verbose >= 1:
             # Show raw description variations
@@ -2207,6 +2385,23 @@ def _print_merchant_explanation(name, data, output_format, verbose, num_months):
         if tags:
             print(f"  Tags: {', '.join(sorted(tags))}")
 
+        # Show matching sections
+        if matching_sections:
+            print()
+            print(f"  Sections:")
+            for section in matching_sections:
+                ctx = section['context']
+                print(f"    ✓ {section['name']}")
+                print(f"      filter: {section['filter']}")
+                print(f"      values: months={ctx['months']}, total=${ctx['total']:,.0f}, cv={ctx['cv']}")
+
+        # Show pattern match info
+        match_info = data.get('match_info')
+        if match_info:
+            pattern = match_info.get('pattern', '')
+            source = match_info.get('source', 'unknown')
+            print(f"\n  Rule: {pattern} ({source})")
+
         if verbose >= 1:
             # Show raw description variations
             raw_descs = data.get('raw_descriptions', {})
@@ -2258,13 +2453,6 @@ def _print_merchant_explanation(name, data, output_format, verbose, num_months):
             print(f"  Calculation: {data.get('calc_type', '')} ({data.get('calc_reasoning', '')})")
             print(f"    Formula: {data.get('calc_formula', '')}")
             print(f"    CV: {reasoning.get('cv', 0):.2f}")
-
-        # Show pattern match info (always show if available)
-        match_info = data.get('match_info')
-        if match_info:
-            pattern = match_info.get('pattern', '')
-            source = match_info.get('source', 'unknown')
-            print(f"\n  Rule: {pattern} ({source})")
         print()
 
 
@@ -2297,47 +2485,43 @@ def _print_classification_summary(section, merchants_dict, verbose, num_months):
 
 
 def _print_explain_summary(stats, verbose):
-    """Print overview summary of all classifications with brief reasons."""
-    section_names = {
-        'monthly': 'Monthly Recurring',
-        'annual': 'Annual Bills',
-        'periodic': 'Periodic Recurring',
-        'travel': 'Travel',
-        'one_off': 'One-Off',
-        'variable': 'Variable/Discretionary',
-    }
+    """Print overview summary of all merchants by category."""
+    by_merchant = stats.get('by_merchant', {})
+    num_months = stats['num_months']
 
-    print("Classification Summary")
+    print("Merchant Summary")
     print("=" * 60)
     print()
 
-    num_months = stats['num_months']
+    # Group by category
+    by_category = {}
+    for name, data in by_merchant.items():
+        cat = data.get('category', 'Unknown')
+        if cat not in by_category:
+            by_category[cat] = []
+        by_category[cat].append((name, data))
 
-    for section in ['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable']:
-        merchants_dict = stats.get(f'{section}_merchants', {})
-        if not merchants_dict:
-            continue
+    # Sort categories by total spend
+    sorted_categories = sorted(
+        by_category.items(),
+        key=lambda x: sum(d.get('total', 0) for _, d in x[1]),
+        reverse=True
+    )
 
-        section_name = section_names.get(section, section)
-        print(f"{section_name} ({len(merchants_dict)} merchants)")
+    for category, merchants in sorted_categories:
+        total = sum(d.get('total', 0) for _, d in merchants)
+        print(f"{category} ({len(merchants)} merchants, ${total:,.0f} YTD)")
 
-        sorted_merchants = sorted(merchants_dict.items(), key=lambda x: x[1].get('monthly_value', 0), reverse=True)
+        sorted_merchants = sorted(merchants, key=lambda x: x[1].get('total', 0), reverse=True)
 
         # Show top 5 or all if verbose
         display_count = len(sorted_merchants) if verbose >= 1 else min(5, len(sorted_merchants))
 
         for name, data in sorted_merchants[:display_count]:
-            category = data.get('category', '')
+            subcategory = data.get('subcategory', '')
             months = data.get('months_active', 0)
-            cv = data.get('cv', 0)
 
-            # Short classification hint
-            if data.get('is_consistent', True):
-                consistency = "consistent"
-            else:
-                consistency = "varies"
-
-            print(f"  {name:<26} {category} ({months}/{num_months} months, {consistency})")
+            print(f"  {name:<26} {subcategory} ({months}/{num_months} months)")
 
         if len(sorted_merchants) > display_count:
             remaining = len(sorted_merchants) - display_count
@@ -2432,7 +2616,6 @@ def main():
         default=True,
         help='Output CSS/JS as separate files instead of embedding (easier to iterate on styling)'
     )
-
     # inspect subcommand
     inspect_parser = subparsers.add_parser(
         'inspect',
@@ -2540,9 +2723,8 @@ def main():
         help='Increase output verbosity (use -v for trace, -vv for full details)'
     )
     explain_parser.add_argument(
-        '--classification', '-c',
-        choices=['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable'],
-        help='Show all merchants in a specific classification'
+        '--section',
+        help='Show all merchants in a specific section (e.g., --section bills)'
     )
     explain_parser.add_argument(
         '--category',

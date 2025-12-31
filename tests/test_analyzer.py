@@ -618,9 +618,9 @@ class TestTravelClassification:
             'max_payment': 300.0,
             'is_consistent': True,
         }
-        classification, reasoning = classify_by_occurrence('Delta Airlines', travel_data, 12)
+        classification, _, reasoning = classify_by_occurrence('Delta Airlines', travel_data, 12)
         assert classification == 'travel'
-        assert 'category=Travel' in reasoning['trace'][1]
+        assert reasoning['category'] == 'Travel'
 
     def test_no_travel_classification_from_is_travel_flag(self):
         """Location-based is_travel flag should NOT trigger travel classification."""
@@ -640,7 +640,7 @@ class TestTravelClassification:
             'is_consistent': True,
             'is_travel': True,  # This should be ignored
         }
-        classification, reasoning = classify_by_occurrence('Local Utility FG', data_with_is_travel_flag, 12)
+        classification, _, reasoning = classify_by_occurrence('Local Utility FG', data_with_is_travel_flag, 12)
         # Should be classified as monthly, not travel
         assert classification == 'monthly', f"Expected 'monthly' but got '{classification}'"
 
@@ -660,7 +660,7 @@ class TestTravelClassification:
             'is_consistent': False,
             'is_travel': True,  # Location detection may have set this
         }
-        classification, reasoning = classify_by_occurrence('TN STATE UNIVERSITY', university_data, 12)
+        classification, _, reasoning = classify_by_occurrence('TN STATE UNIVERSITY', university_data, 12)
         # Should be classified as periodic (tuition), not travel
         assert classification == 'periodic', f"Expected 'periodic' but got '{classification}'"
 
@@ -680,15 +680,15 @@ class TestTravelClassification:
             'is_consistent': True,
             'is_travel': True,  # Location detection may have misinterpreted "AP"
         }
-        classification, reasoning = classify_by_occurrence('APPLIANCE DEPOT AP', retailer_data, 12)
+        classification, _, reasoning = classify_by_occurrence('APPLIANCE DEPOT AP', retailer_data, 12)
         # With total=$500 (under $1000), it won't meet one_off criteria, so should be variable
         assert classification == 'variable', f"Expected 'variable' but got '{classification}'"
 
-    def test_travel_trace_no_longer_mentions_is_travel_flag(self):
-        """The decision trace should no longer mention is_travel flag."""
+    def test_is_travel_flag_not_used_for_classification(self):
+        """The is_travel flag should not affect classification (only category matters)."""
         from tally.analyzer import classify_by_occurrence
 
-        # Non-travel merchant
+        # Non-travel category merchant with is_travel flag should NOT be travel
         data = {
             'category': 'Food',
             'subcategory': 'Restaurant',
@@ -698,17 +698,13 @@ class TestTravelClassification:
             'cv': 0.2,
             'max_payment': 75.0,
             'is_consistent': True,
+            'is_travel': True,  # This should be ignored
         }
-        _, reasoning = classify_by_occurrence('Local Restaurant', data, 12)
+        classification, _, reasoning = classify_by_occurrence('Local Restaurant', data, 12)
 
-        # Find the travel trace line
-        travel_trace = [t for t in reasoning['trace'] if 'travel' in t.lower()]
-        assert len(travel_trace) > 0, "Should have a travel trace line"
-
-        # The trace should not mention is_travel=false
-        for trace in travel_trace:
-            assert 'is_travel=false' not in trace, f"Trace should not mention is_travel flag: {trace}"
-            assert 'is_travel=true' not in trace, f"Trace should not mention is_travel flag: {trace}"
+        # Should NOT be travel since category is Food, not Travel
+        assert classification != 'travel', "Food category should not be classified as travel"
+        assert reasoning['category'] == 'Food'
 
 
 class TestRegexDelimiter:

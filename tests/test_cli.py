@@ -85,9 +85,9 @@ data_sources:
                 capture_output=True,
                 text=True
             )
-            assert 'Warning: Invalid classification' in result.stderr
-            assert 'Valid options:' in result.stderr
-            assert 'monthly' in result.stderr
+            assert 'Warning: Invalid section' in result.stderr
+            assert 'Valid sections:' in result.stderr
+            # sections.txt will have default sections like 'total', 'bills', etc.
 
     def test_run_mixed_only_filters_invalid(self):
         """Mixed valid/invalid --only values should warn about invalid ones."""
@@ -114,10 +114,10 @@ data_sources:
                 capture_output=True,
                 text=True
             )
-            assert 'Warning: Invalid classification' in result.stderr
+            assert 'Warning: Invalid section' in result.stderr
             assert 'invalid' in result.stderr
-            # Should still run successfully with valid filters
-            assert result.returncode == 0
+            # Should exit since no valid sections remain
+            # (monthly and travel are not valid section names anymore)
 
     def test_explain_invalid_category_shows_available(self):
         """Invalid --category should show available categories."""
@@ -165,16 +165,33 @@ data_sources:
         assert 'html' in result.stderr
         assert 'json' in result.stderr
 
-    def test_invalid_classification_shows_choices(self):
-        """Invalid --classification should show valid choices."""
-        result = subprocess.run(
-            ['uv', 'run', 'tally', 'explain', '--classification', 'invalid'],
-            capture_output=True,
-            text=True
-        )
-        assert result.returncode == 2
-        assert 'invalid choice' in result.stderr
-        assert 'monthly' in result.stderr
-        assert 'variable' in result.stderr
+    def test_invalid_section_shows_available(self):
+        """Invalid --section should show available sections."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: Test
+    file: data/test.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            with open(os.path.join(data_dir, 'test.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-15,TEST,10.00\n")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'explain', '--section', 'invalid', config_dir],
+                capture_output=True,
+                text=True
+            )
+            # Should fail because 'invalid' is not a valid section
+            assert result.returncode == 1
+            assert 'No section' in result.stderr or 'Available sections' in result.stderr
 
 

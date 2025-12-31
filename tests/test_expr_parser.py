@@ -1,0 +1,600 @@
+"""Tests for the AST-based expression parser."""
+
+import pytest
+from datetime import date
+from tally.expr_parser import (
+    parse, parse_expression, evaluate, evaluate_ast, evaluate_filter,
+    create_context, ExpressionContext, ExpressionEvaluator,
+    ExpressionError, UnsafeNodeError, validate_ast,
+)
+
+
+# =============================================================================
+# Test Data Helpers
+# =============================================================================
+
+def make_transactions(amounts, category="Food", subcategory="Grocery", tags=None):
+    """Create test transactions with given amounts."""
+    txns = []
+    for i, amount in enumerate(amounts):
+        txns.append({
+            'amount': amount,
+            'date': date(2025, (i % 12) + 1, 15),
+            'category': category,
+            'subcategory': subcategory,
+            'merchant': 'Test Merchant',
+            'tags': tags or [],
+        })
+    return txns
+
+
+# =============================================================================
+# Parsing Tests - Valid Expressions
+# =============================================================================
+
+class TestParsing:
+    """Test that valid expressions parse without error."""
+
+    def test_number(self):
+        tree = parse("42")
+        assert tree is not None
+
+    def test_float(self):
+        tree = parse("3.14")
+        assert tree is not None
+
+    def test_string(self):
+        tree = parse('"hello"')
+        assert tree is not None
+
+    def test_identifier(self):
+        tree = parse("category")
+        assert tree is not None
+
+    def test_comparison_equal(self):
+        tree = parse('category == "Food"')
+        assert tree is not None
+
+    def test_comparison_not_equal(self):
+        tree = parse('category != "Food"')
+        assert tree is not None
+
+    def test_comparison_less_than(self):
+        tree = parse("months < 6")
+        assert tree is not None
+
+    def test_comparison_greater_equal(self):
+        tree = parse("months >= 6")
+        assert tree is not None
+
+    def test_boolean_and(self):
+        tree = parse('category == "Food" and months >= 6')
+        assert tree is not None
+
+    def test_boolean_or(self):
+        tree = parse('category == "Food" or category == "Bills"')
+        assert tree is not None
+
+    def test_boolean_not(self):
+        tree = parse('not category == "Food"')
+        assert tree is not None
+
+    def test_arithmetic_add(self):
+        tree = parse("1 + 2")
+        assert tree is not None
+
+    def test_arithmetic_subtract(self):
+        tree = parse("5 - 3")
+        assert tree is not None
+
+    def test_arithmetic_multiply(self):
+        tree = parse("2 * 3")
+        assert tree is not None
+
+    def test_arithmetic_divide(self):
+        tree = parse("10 / 2")
+        assert tree is not None
+
+    def test_unary_minus(self):
+        tree = parse("-5")
+        assert tree is not None
+
+    def test_parentheses(self):
+        tree = parse("(1 + 2) * 3")
+        assert tree is not None
+
+    def test_function_call(self):
+        tree = parse("sum(payments)")
+        assert tree is not None
+
+    def test_in_operator(self):
+        tree = parse('"recurring" in tags')
+        assert tree is not None
+
+    def test_not_in_operator(self):
+        tree = parse('"recurring" not in tags')
+        assert tree is not None
+
+    def test_complex_expression(self):
+        tree = parse('category == "Bills" and months >= 6 and sum(payments) > 1000')
+        assert tree is not None
+
+    def test_ternary(self):
+        tree = parse('1 if True else 0')
+        assert tree is not None
+
+
+# =============================================================================
+# Parsing Tests - Invalid Expressions
+# =============================================================================
+
+class TestParsingErrors:
+    """Test that invalid expressions raise appropriate errors."""
+
+    def test_syntax_error(self):
+        with pytest.raises(ExpressionError) as exc:
+            parse("1 +")
+        assert "Syntax error" in str(exc.value)
+
+    def test_unclosed_paren(self):
+        with pytest.raises(ExpressionError) as exc:
+            parse("(1 + 2")
+        assert "Syntax error" in str(exc.value)
+
+    def test_unsafe_import(self):
+        # __import__ parses as a valid function call, but evaluation fails
+        tree = parse("__import__('os')")
+        ctx = create_context()
+        with pytest.raises(ExpressionError) as exc:
+            evaluate("__import__('os')", ctx)
+        assert "Unknown function" in str(exc.value)
+
+    def test_unsafe_lambda(self):
+        with pytest.raises(UnsafeNodeError):
+            parse("lambda x: x")
+
+    def test_unsafe_list_comp(self):
+        with pytest.raises(UnsafeNodeError):
+            parse("[x for x in range(10)]")
+
+    def test_unsafe_dict(self):
+        with pytest.raises(UnsafeNodeError):
+            parse("{'a': 1}")
+
+    def test_unsafe_list(self):
+        with pytest.raises(UnsafeNodeError):
+            parse("[1, 2, 3]")
+
+
+# =============================================================================
+# Evaluation Tests - Literals
+# =============================================================================
+
+class TestEvaluateLiterals:
+    """Test evaluation of literal values."""
+
+    def test_integer(self):
+        ctx = create_context()
+        assert evaluate("42", ctx) == 42
+
+    def test_float(self):
+        ctx = create_context()
+        assert evaluate("3.14", ctx) == 3.14
+
+    def test_string(self):
+        ctx = create_context()
+        assert evaluate('"hello"', ctx) == "hello"
+
+    def test_true(self):
+        ctx = create_context()
+        assert evaluate("True", ctx) is True
+
+    def test_false(self):
+        ctx = create_context()
+        assert evaluate("False", ctx) is False
+
+
+# =============================================================================
+# Evaluation Tests - Arithmetic
+# =============================================================================
+
+class TestEvaluateArithmetic:
+    """Test evaluation of arithmetic expressions."""
+
+    def test_addition(self):
+        ctx = create_context()
+        assert evaluate("1 + 2", ctx) == 3
+
+    def test_subtraction(self):
+        ctx = create_context()
+        assert evaluate("5 - 3", ctx) == 2
+
+    def test_multiplication(self):
+        ctx = create_context()
+        assert evaluate("2 * 3", ctx) == 6
+
+    def test_division(self):
+        ctx = create_context()
+        assert evaluate("10 / 2", ctx) == 5
+
+    def test_modulo(self):
+        ctx = create_context()
+        assert evaluate("7 % 3", ctx) == 1
+
+    def test_unary_minus(self):
+        ctx = create_context()
+        assert evaluate("-5", ctx) == -5
+
+    def test_precedence(self):
+        ctx = create_context()
+        assert evaluate("1 + 2 * 3", ctx) == 7
+
+    def test_parentheses_override_precedence(self):
+        ctx = create_context()
+        assert evaluate("(1 + 2) * 3", ctx) == 9
+
+    def test_division_by_zero(self):
+        ctx = create_context()
+        # Should return 0, not raise
+        assert evaluate("10 / 0", ctx) == 0
+
+
+# =============================================================================
+# Evaluation Tests - Comparisons
+# =============================================================================
+
+class TestEvaluateComparisons:
+    """Test evaluation of comparison expressions."""
+
+    def test_equal_numbers(self):
+        ctx = create_context()
+        assert evaluate("1 == 1", ctx) is True
+        assert evaluate("1 == 2", ctx) is False
+
+    def test_not_equal_numbers(self):
+        ctx = create_context()
+        assert evaluate("1 != 2", ctx) is True
+        assert evaluate("1 != 1", ctx) is False
+
+    def test_less_than(self):
+        ctx = create_context()
+        assert evaluate("1 < 2", ctx) is True
+        assert evaluate("2 < 1", ctx) is False
+
+    def test_less_equal(self):
+        ctx = create_context()
+        assert evaluate("1 <= 1", ctx) is True
+        assert evaluate("1 <= 2", ctx) is True
+        assert evaluate("2 <= 1", ctx) is False
+
+    def test_greater_than(self):
+        ctx = create_context()
+        assert evaluate("2 > 1", ctx) is True
+        assert evaluate("1 > 2", ctx) is False
+
+    def test_greater_equal(self):
+        ctx = create_context()
+        assert evaluate("1 >= 1", ctx) is True
+        assert evaluate("2 >= 1", ctx) is True
+        assert evaluate("1 >= 2", ctx) is False
+
+    def test_string_equality_case_insensitive(self):
+        ctx = create_context()
+        assert evaluate('"FOOD" == "food"', ctx) is True
+        assert evaluate('"Food" == "FOOD"', ctx) is True
+
+    def test_chained_comparison(self):
+        ctx = create_context()
+        assert evaluate("1 < 2 < 3", ctx) is True
+        assert evaluate("1 < 2 > 3", ctx) is False
+
+
+# =============================================================================
+# Evaluation Tests - Boolean Logic
+# =============================================================================
+
+class TestEvaluateBooleanLogic:
+    """Test evaluation of boolean expressions."""
+
+    def test_and_true(self):
+        ctx = create_context()
+        assert evaluate("True and True", ctx) is True
+
+    def test_and_false(self):
+        ctx = create_context()
+        assert evaluate("True and False", ctx) is False
+        assert evaluate("False and True", ctx) is False
+
+    def test_or_true(self):
+        ctx = create_context()
+        assert evaluate("True or False", ctx) is True
+        assert evaluate("False or True", ctx) is True
+
+    def test_or_false(self):
+        ctx = create_context()
+        assert evaluate("False or False", ctx) is False
+
+    def test_not_true(self):
+        ctx = create_context()
+        assert evaluate("not True", ctx) is False
+
+    def test_not_false(self):
+        ctx = create_context()
+        assert evaluate("not False", ctx) is True
+
+    def test_short_circuit_and(self):
+        # Should not evaluate second expression if first is False
+        ctx = create_context()
+        assert evaluate("False and unknown_var", ctx) is False
+
+    def test_short_circuit_or(self):
+        # Should not evaluate second expression if first is True
+        ctx = create_context()
+        assert evaluate("True or unknown_var", ctx) is True
+
+
+# =============================================================================
+# Evaluation Tests - In Operator
+# =============================================================================
+
+class TestEvaluateIn:
+    """Test evaluation of 'in' operator for set membership."""
+
+    def test_string_in_set(self):
+        ctx = create_context(
+            transactions=make_transactions([100], tags=["recurring", "monthly"])
+        )
+        assert evaluate('"recurring" in tags', ctx) is True
+        assert evaluate('"annual" in tags', ctx) is False
+
+    def test_string_in_set_case_insensitive(self):
+        ctx = create_context(
+            transactions=make_transactions([100], tags=["Recurring"])
+        )
+        assert evaluate('"recurring" in tags', ctx) is True
+        assert evaluate('"RECURRING" in tags', ctx) is True
+
+    def test_not_in_set(self):
+        ctx = create_context(
+            transactions=make_transactions([100], tags=["recurring"])
+        )
+        assert evaluate('"annual" not in tags', ctx) is True
+        assert evaluate('"recurring" not in tags', ctx) is False
+
+
+# =============================================================================
+# Evaluation Tests - Primitives
+# =============================================================================
+
+class TestEvaluatePrimitives:
+    """Test evaluation of built-in primitives."""
+
+    def test_payments(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        assert evaluate("payments", ctx) == [100, 200, 300]
+
+    def test_months(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        # Each transaction is in a different month (1, 2, 3)
+        assert evaluate("months", ctx) == 3
+
+    def test_category(self):
+        ctx = create_context(
+            transactions=make_transactions([100], category="Food")
+        )
+        assert evaluate("category", ctx) == "Food"
+
+    def test_subcategory(self):
+        ctx = create_context(
+            transactions=make_transactions([100], subcategory="Grocery")
+        )
+        assert evaluate("subcategory", ctx) == "Grocery"
+
+    def test_tags(self):
+        ctx = create_context(
+            transactions=make_transactions([100], tags=["recurring", "monthly"])
+        )
+        tags = evaluate("tags", ctx)
+        assert "recurring" in tags
+        assert "monthly" in tags
+
+    def test_empty_transactions(self):
+        ctx = create_context(transactions=[])
+        assert evaluate("payments", ctx) == []
+        assert evaluate("months", ctx) == 1  # Default to 1
+        assert evaluate("category", ctx) == ""
+        assert evaluate("subcategory", ctx) == ""
+
+
+# =============================================================================
+# Evaluation Tests - Functions
+# =============================================================================
+
+class TestEvaluateFunctions:
+    """Test evaluation of built-in functions."""
+
+    def test_sum(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        assert evaluate("sum(payments)", ctx) == 600
+
+    def test_sum_empty(self):
+        ctx = create_context(transactions=[])
+        assert evaluate("sum(payments)", ctx) == 0
+
+    def test_count(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        assert evaluate("count(payments)", ctx) == 3
+
+    def test_count_empty(self):
+        ctx = create_context(transactions=[])
+        assert evaluate("count(payments)", ctx) == 0
+
+    def test_avg(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        assert evaluate("avg(payments)", ctx) == 200
+
+    def test_avg_empty(self):
+        ctx = create_context(transactions=[])
+        assert evaluate("avg(payments)", ctx) == 0
+
+    def test_max(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        assert evaluate("max(payments)", ctx) == 300
+
+    def test_max_empty(self):
+        ctx = create_context(transactions=[])
+        assert evaluate("max(payments)", ctx) == 0
+
+    def test_min(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        assert evaluate("min(payments)", ctx) == 100
+
+    def test_min_empty(self):
+        ctx = create_context(transactions=[])
+        assert evaluate("min(payments)", ctx) == 0
+
+    def test_stddev(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        result = evaluate("stddev(payments)", ctx)
+        assert abs(result - 100.0) < 0.01
+
+    def test_stddev_single_value(self):
+        ctx = create_context(transactions=make_transactions([100]))
+        assert evaluate("stddev(payments)", ctx) == 0
+
+    def test_abs(self):
+        ctx = create_context()
+        assert evaluate("abs(-5)", ctx) == 5
+
+    def test_round(self):
+        ctx = create_context()
+        assert evaluate("round(3.7)", ctx) == 4
+
+
+# =============================================================================
+# Evaluation Tests - Variables
+# =============================================================================
+
+class TestEvaluateVariables:
+    """Test evaluation with user-defined variables."""
+
+    def test_custom_variable(self):
+        ctx = create_context(variables={"threshold": 500})
+        assert evaluate("threshold", ctx) == 500
+
+    def test_variable_in_expression(self):
+        ctx = create_context(
+            transactions=make_transactions([100, 200, 300]),
+            variables={"threshold": 500}
+        )
+        assert evaluate("sum(payments) > threshold", ctx) is True
+
+    def test_variable_overrides_primitive(self):
+        # User variables should take precedence
+        ctx = create_context(
+            transactions=make_transactions([100, 200, 300]),
+            variables={"payments": [1000]}
+        )
+        assert evaluate("sum(payments)", ctx) == 1000
+
+    def test_unknown_variable(self):
+        ctx = create_context()
+        with pytest.raises(ExpressionError) as exc:
+            evaluate("unknown_var", ctx)
+        assert "Unknown variable" in str(exc.value)
+
+
+# =============================================================================
+# Evaluation Tests - Complex Expressions
+# =============================================================================
+
+class TestEvaluateComplex:
+    """Test evaluation of complex expressions."""
+
+    def test_category_filter(self):
+        ctx = create_context(
+            transactions=make_transactions([100], category="Food")
+        )
+        assert evaluate('category == "Food"', ctx) is True
+        assert evaluate('category == "Bills"', ctx) is False
+
+    def test_combined_filter(self):
+        ctx = create_context(
+            transactions=make_transactions([100, 200, 300], category="Bills")
+        )
+        assert evaluate('category == "Bills" and months >= 3', ctx) is True
+        assert evaluate('category == "Bills" and months >= 6', ctx) is False
+
+    def test_sum_comparison(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        assert evaluate("sum(payments) > 500", ctx) is True
+        assert evaluate("sum(payments) > 700", ctx) is False
+
+    def test_cv_calculation(self):
+        ctx = create_context(transactions=make_transactions([100, 100, 100]))
+        # CV = stddev / avg, all same = stddev 0
+        assert evaluate("stddev(payments) / avg(payments)", ctx) == 0
+
+    def test_monthly_average(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        # Total = 600, months = 3, avg = 200
+        assert evaluate("sum(payments) / months", ctx) == 200
+
+    def test_ternary_expression(self):
+        ctx = create_context(transactions=make_transactions([100, 200, 300]))
+        assert evaluate('1 if sum(payments) > 500 else 0', ctx) == 1
+        assert evaluate('1 if sum(payments) > 700 else 0', ctx) == 0
+
+
+# =============================================================================
+# Convenience Function Tests
+# =============================================================================
+
+class TestEvaluateFilter:
+    """Test the evaluate_filter convenience function."""
+
+    def test_simple_filter(self):
+        txns = make_transactions([100, 200], category="Food")
+        assert evaluate_filter('category == "Food"', txns) is True
+        assert evaluate_filter('category == "Bills"', txns) is False
+
+    def test_filter_with_variables(self):
+        txns = make_transactions([100, 200])
+        assert evaluate_filter("sum(payments) > threshold", txns, variables={"threshold": 250}) is True
+        assert evaluate_filter("sum(payments) > threshold", txns, variables={"threshold": 350}) is False
+
+    def test_filter_with_num_months(self):
+        txns = make_transactions([100, 200])
+        # This tests that num_months is passed to context (used for percentage calculations)
+        ctx = create_context(transactions=txns, num_months=12)
+        assert ctx.num_months == 12
+
+
+# =============================================================================
+# Pre-parsed AST Tests
+# =============================================================================
+
+class TestPreParsedAST:
+    """Test evaluation of pre-parsed AST for performance."""
+
+    def test_evaluate_ast(self):
+        tree = parse("sum(payments) > 500")
+
+        ctx1 = create_context(transactions=make_transactions([100, 200, 300]))
+        assert evaluate_ast(tree, ctx1) is True
+
+        ctx2 = create_context(transactions=make_transactions([100, 100]))
+        assert evaluate_ast(tree, ctx2) is False
+
+    def test_reuse_parsed_ast(self):
+        """Parse once, evaluate many times."""
+        tree = parse('category == "Food" and sum(payments) > 100')
+
+        # Test with multiple contexts
+        ctx1 = create_context(transactions=make_transactions([50, 60], category="Food"))
+        ctx2 = create_context(transactions=make_transactions([50, 60], category="Bills"))
+        ctx3 = create_context(transactions=make_transactions([150], category="Food"))
+
+        assert evaluate_ast(tree, ctx1) is True  # Food, sum=110 > 100
+        assert evaluate_ast(tree, ctx2) is False  # Bills, not Food
+        assert evaluate_ast(tree, ctx3) is True  # Food, sum=150 > 100

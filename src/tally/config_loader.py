@@ -7,6 +7,8 @@ Loads settings from YAML config files.
 import os
 
 from .format_parser import parse_format_string, is_special_parser_type, get_account_type_settings
+from .classification_rules import load_rules, get_default_rules, write_default_rules, get_default_rules_parsed
+from .section_engine import load_sections, get_default_sections_parsed, write_default_sections, SectionParseError
 
 # Try to import yaml, fall back to simple parsing if not available
 try:
@@ -245,5 +247,49 @@ def load_config(config_dir, settings_file='settings.yaml'):
 
     # Currency format for display (default: USD)
     config['currency_format'] = config.get('currency_format', '${amount}')
+
+    # Load classification rules
+    rules_file = os.path.join(config_dir, 'classification_rules.txt')
+    if os.path.exists(rules_file):
+        try:
+            config['classification_rules'] = load_rules(rules_file)
+            config['_rules_file'] = rules_file
+        except Exception as e:
+            warnings.append({
+                'type': 'error',
+                'source': 'classification_rules.txt',
+                'message': f"Error loading classification rules: {e}",
+                'suggestion': "Fix the syntax error or delete the file to regenerate defaults.",
+            })
+            config['classification_rules'] = get_default_rules_parsed()
+            config['_rules_file'] = None
+    else:
+        # Create default rules file
+        write_default_rules(rules_file)
+        config['classification_rules'] = get_default_rules_parsed()
+        config['_rules_file'] = rules_file
+        # Don't warn - this is expected on first run
+
+    # Load section definitions
+    sections_file = os.path.join(config_dir, 'sections.txt')
+    if os.path.exists(sections_file):
+        try:
+            config['sections'] = load_sections(sections_file)
+            config['_sections_file'] = sections_file
+        except SectionParseError as e:
+            warnings.append({
+                'type': 'error',
+                'source': 'sections.txt',
+                'message': f"Error loading sections: {e}",
+                'suggestion': "Fix the syntax error or delete the file to regenerate defaults.",
+            })
+            config['sections'] = get_default_sections_parsed()
+            config['_sections_file'] = None
+    else:
+        # Create default sections file
+        write_default_sections(sections_file)
+        config['sections'] = get_default_sections_parsed()
+        config['_sections_file'] = sections_file
+        # Don't warn - this is expected on first run
 
     return config

@@ -1,0 +1,455 @@
+"""
+Expression parser using Python AST with whitelist validation.
+
+Uses Python's ast.parse for parsing, then validates against a whitelist
+of allowed node types. Custom evaluator handles lookups and functions.
+
+Supports expressions like:
+    category == "Food" and months >= 6
+    sum(payments) > 1000
+    "recurring" in tags
+    stddev(payments) / avg(payments) < 0.3
+"""
+
+import ast
+import re
+import statistics
+from typing import Any, Dict, List, Optional, Set, Callable
+
+
+# =============================================================================
+# Whitelist of allowed AST nodes
+# =============================================================================
+
+ALLOWED_NODES = {
+    # Expressions
+    ast.Expression,
+    ast.BoolOp,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Compare,
+    ast.Call,
+    ast.IfExp,  # ternary: x if cond else y
+
+    # Operators
+    ast.And,
+    ast.Or,
+    ast.Not,
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.Mod,
+    ast.USub,  # unary minus
+
+    # Comparisons
+    ast.Eq,
+    ast.NotEq,
+    ast.Lt,
+    ast.LtE,
+    ast.Gt,
+    ast.GtE,
+    ast.In,
+    ast.NotIn,
+
+    # Literals and names
+    ast.Constant,
+    ast.Name,
+    ast.Load,
+
+    # For attribute access like payment.amount (optional)
+    ast.Attribute,
+}
+
+
+class ExpressionError(Exception):
+    """Error in expression parsing or evaluation."""
+    pass
+
+
+class UnsafeNodeError(ExpressionError):
+    """Expression contains disallowed AST node."""
+    pass
+
+
+# =============================================================================
+# AST Validation
+# =============================================================================
+
+def validate_ast(node: ast.AST, allowed: Set[type] = ALLOWED_NODES) -> None:
+    """
+    Validate that an AST only contains allowed node types.
+
+    Raises UnsafeNodeError if disallowed nodes are found.
+    """
+    if type(node) not in allowed:
+        raise UnsafeNodeError(f"Disallowed node type: {type(node).__name__}")
+
+    for child in ast.iter_child_nodes(node):
+        validate_ast(child, allowed)
+
+
+def parse_expression(expr: str) -> ast.Expression:
+    """
+    Parse an expression string into a validated AST.
+
+    Returns the AST if valid, raises ExpressionError otherwise.
+    """
+    try:
+        tree = ast.parse(expr, mode='eval')
+        validate_ast(tree)
+        return tree
+    except SyntaxError as e:
+        raise ExpressionError(f"Syntax error: {e.msg} at position {e.offset}")
+    except UnsafeNodeError:
+        raise
+
+
+# =============================================================================
+# Expression Evaluator
+# =============================================================================
+
+class ExpressionContext:
+    """
+    Context for evaluating expressions.
+
+    Provides variables, functions, and transaction data for evaluation.
+    """
+
+    def __init__(
+        self,
+        transactions: Optional[List[Dict]] = None,
+        num_months: int = 12,
+        variables: Optional[Dict[str, Any]] = None,
+    ):
+        self.transactions = transactions or []
+        self.num_months = num_months
+        self.variables = variables or {}
+
+        # Built-in functions
+        self.functions: Dict[str, Callable] = {
+            'sum': self._fn_sum,
+            'count': self._fn_count,
+            'avg': self._fn_avg,
+            'max': self._fn_max,
+            'min': self._fn_min,
+            'stddev': self._fn_stddev,
+            'abs': abs,
+            'round': round,
+        }
+
+    def get_payments(self) -> List[float]:
+        """Get all payment amounts from transactions."""
+        return [t['amount'] for t in self.transactions]
+
+    def get_months(self) -> int:
+        """Get count of unique months with transactions."""
+        months = set()
+        for t in self.transactions:
+            if 'date' in t:
+                months.add(t['date'].strftime('%Y-%m'))
+        return len(months) if months else 1
+
+    def get_tags(self) -> Set[str]:
+        """Get all tags from transactions."""
+        tags = set()
+        for t in self.transactions:
+            for tag in t.get('tags', []):
+                tags.add(tag.lower())
+        return tags
+
+    def get_category(self) -> str:
+        """Get category (assumes all transactions have same category)."""
+        if self.transactions:
+            return self.transactions[0].get('category', '')
+        return ''
+
+    def get_subcategory(self) -> str:
+        """Get subcategory."""
+        if self.transactions:
+            return self.transactions[0].get('subcategory', '')
+        return ''
+
+    def get_merchant(self) -> str:
+        """Get merchant name."""
+        if self.transactions:
+            return self.transactions[0].get('merchant', '')
+        return ''
+
+    def get_cv(self) -> float:
+        """Get coefficient of variation (stddev/avg) of monthly totals.
+
+        Aggregates payments by month first, then computes CV of monthly totals.
+        This matches the analyzer's calculation and reflects whether spending
+        is consistent month-to-month (e.g., rent) vs variable (e.g., shopping).
+        """
+        # Aggregate payments by month
+        monthly_totals = {}
+        for t in self.transactions:
+            if 'date' in t:
+                month_key = t['date'].strftime('%Y-%m')
+                monthly_totals[month_key] = monthly_totals.get(month_key, 0) + t['amount']
+
+        if len(monthly_totals) < 2:
+            return 0.0
+
+        values = list(monthly_totals.values())
+        avg = sum(values) / len(values)
+        if avg == 0:
+            return 0.0
+        variance = sum((x - avg) ** 2 for x in values) / len(values)
+        stddev = variance ** 0.5
+        return stddev / avg
+
+    def get_total(self) -> float:
+        """Get total of all payments."""
+        return sum(self.get_payments())
+
+    # Built-in functions
+
+    def _fn_sum(self, values: List[float]) -> float:
+        return sum(values) if values else 0
+
+    def _fn_count(self, values: List[float]) -> int:
+        return len(values)
+
+    def _fn_avg(self, values: List[float]) -> float:
+        return sum(values) / len(values) if values else 0
+
+    def _fn_max(self, values: List[float]) -> float:
+        return max(values) if values else 0
+
+    def _fn_min(self, values: List[float]) -> float:
+        return min(values) if values else 0
+
+    def _fn_stddev(self, values: List[float]) -> float:
+        if len(values) < 2:
+            return 0
+        return statistics.stdev(values)
+
+
+class ExpressionEvaluator:
+    """
+    Evaluates a parsed AST expression against a context.
+    """
+
+    def __init__(self, ctx: ExpressionContext):
+        self.ctx = ctx
+
+    def evaluate(self, node: ast.AST) -> Any:
+        """Evaluate an AST node and return its value."""
+        method = f'_eval_{type(node).__name__}'
+        if hasattr(self, method):
+            return getattr(self, method)(node)
+        raise ExpressionError(f"Cannot evaluate node type: {type(node).__name__}")
+
+    def _eval_Expression(self, node: ast.Expression) -> Any:
+        return self.evaluate(node.body)
+
+    def _eval_Constant(self, node: ast.Constant) -> Any:
+        return node.value
+
+    def _eval_Name(self, node: ast.Name) -> Any:
+        name = node.id.lower()
+
+        # Check user-defined variables first
+        if name in self.ctx.variables:
+            return self.ctx.variables[name]
+
+        # Built-in primitives
+        if name == 'payments':
+            return self.ctx.get_payments()
+        if name == 'months':
+            return self.ctx.get_months()
+        if name == 'category':
+            return self.ctx.get_category()
+        if name == 'subcategory':
+            return self.ctx.get_subcategory()
+        if name == 'merchant':
+            return self.ctx.get_merchant()
+        if name == 'tags':
+            return self.ctx.get_tags()
+        if name == 'cv':
+            return self.ctx.get_cv()
+        if name == 'total':
+            return self.ctx.get_total()
+        if name == 'is_consistent':
+            return self.ctx.get_is_consistent()
+        if name == 'true':
+            return True
+        if name == 'false':
+            return False
+
+        raise ExpressionError(f"Unknown variable: {node.id}")
+
+    def _eval_BoolOp(self, node: ast.BoolOp) -> bool:
+        if isinstance(node.op, ast.And):
+            for value in node.values:
+                if not self.evaluate(value):
+                    return False
+            return True
+        elif isinstance(node.op, ast.Or):
+            for value in node.values:
+                if self.evaluate(value):
+                    return True
+            return False
+        raise ExpressionError(f"Unknown boolean operator: {type(node.op).__name__}")
+
+    def _eval_BinOp(self, node: ast.BinOp) -> Any:
+        left = self.evaluate(node.left)
+        right = self.evaluate(node.right)
+
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        if isinstance(node.op, ast.Div):
+            if right == 0:
+                return 0
+            return left / right
+        if isinstance(node.op, ast.Mod):
+            if right == 0:
+                return 0
+            return left % right
+
+        raise ExpressionError(f"Unknown binary operator: {type(node.op).__name__}")
+
+    def _eval_UnaryOp(self, node: ast.UnaryOp) -> Any:
+        operand = self.evaluate(node.operand)
+
+        if isinstance(node.op, ast.Not):
+            return not operand
+        if isinstance(node.op, ast.USub):
+            return -operand
+
+        raise ExpressionError(f"Unknown unary operator: {type(node.op).__name__}")
+
+    def _eval_Compare(self, node: ast.Compare) -> bool:
+        left = self.evaluate(node.left)
+
+        for op, comparator in zip(node.ops, node.comparators):
+            right = self.evaluate(comparator)
+
+            if isinstance(op, ast.Eq):
+                # Case-insensitive string comparison
+                if isinstance(left, str) and isinstance(right, str):
+                    result = left.lower() == right.lower()
+                else:
+                    result = left == right
+            elif isinstance(op, ast.NotEq):
+                if isinstance(left, str) and isinstance(right, str):
+                    result = left.lower() != right.lower()
+                else:
+                    result = left != right
+            elif isinstance(op, ast.Lt):
+                result = left < right
+            elif isinstance(op, ast.LtE):
+                result = left <= right
+            elif isinstance(op, ast.Gt):
+                result = left > right
+            elif isinstance(op, ast.GtE):
+                result = left >= right
+            elif isinstance(op, ast.In):
+                # Handle "x" in tags (set membership)
+                if isinstance(right, set):
+                    result = left.lower() in right if isinstance(left, str) else left in right
+                else:
+                    result = left in right
+            elif isinstance(op, ast.NotIn):
+                if isinstance(right, set):
+                    result = left.lower() not in right if isinstance(left, str) else left not in right
+                else:
+                    result = left not in right
+            else:
+                raise ExpressionError(f"Unknown comparison operator: {type(op).__name__}")
+
+            if not result:
+                return False
+            left = right
+
+        return True
+
+    def _eval_Call(self, node: ast.Call) -> Any:
+        # Get function name
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id.lower()
+        else:
+            raise ExpressionError("Only simple function calls are supported")
+
+        if func_name not in self.ctx.functions:
+            raise ExpressionError(f"Unknown function: {func_name}")
+
+        # Evaluate arguments
+        args = [self.evaluate(arg) for arg in node.args]
+
+        # Call the function
+        func = self.ctx.functions[func_name]
+        return func(*args)
+
+    def _eval_IfExp(self, node: ast.IfExp) -> Any:
+        """Evaluate ternary: x if condition else y"""
+        if self.evaluate(node.test):
+            return self.evaluate(node.body)
+        else:
+            return self.evaluate(node.orelse)
+
+
+# =============================================================================
+# Public API
+# =============================================================================
+
+def parse(expr: str) -> ast.Expression:
+    """Parse an expression string into a validated AST."""
+    return parse_expression(expr)
+
+
+def evaluate(expr: str, ctx: ExpressionContext) -> Any:
+    """Parse and evaluate an expression in the given context."""
+    tree = parse_expression(expr)
+    evaluator = ExpressionEvaluator(ctx)
+    return evaluator.evaluate(tree)
+
+
+def evaluate_ast(tree: ast.Expression, ctx: ExpressionContext) -> Any:
+    """Evaluate a pre-parsed AST in the given context."""
+    evaluator = ExpressionEvaluator(ctx)
+    return evaluator.evaluate(tree)
+
+
+# =============================================================================
+# Convenience Functions
+# =============================================================================
+
+def evaluate_filter(
+    expr: str,
+    transactions: List[Dict],
+    num_months: int = 12,
+    variables: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Evaluate a filter expression against transactions.
+
+    Returns True if the filter matches, False otherwise.
+    """
+    ctx = ExpressionContext(
+        transactions=transactions,
+        num_months=num_months,
+        variables=variables or {},
+    )
+    result = evaluate(expr, ctx)
+    return bool(result)
+
+
+def create_context(
+    transactions: Optional[List[Dict]] = None,
+    num_months: int = 12,
+    variables: Optional[Dict[str, Any]] = None,
+) -> ExpressionContext:
+    """Create an expression evaluation context."""
+    return ExpressionContext(
+        transactions=transactions,
+        num_months=num_months,
+        variables=variables,
+    )
