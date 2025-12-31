@@ -343,11 +343,13 @@ data_sources:
   # Example credit card CSV:
   # - name: Credit Card
   #   file: data/card-{year}.csv
+  #   account_type: credit_card  # positive = purchase
   #   format: "{{date:%m/%d/%Y}},{{description}},{{amount}}"
   #
   # Example bank statement:
   # - name: Checking
   #   file: data/checking-{year}.csv
+  #   account_type: bank  # negative = purchase, filters income
   #   format: "{{date:%Y-%m-%d}},{{description}},{{amount}}"
 
 output_dir: output
@@ -2268,6 +2270,7 @@ def cmd_workflow(args):
         print(f"       {C.DIM}data_sources:")
         print(f"         - name: My Card")
         print(f"           file: data/transactions.csv")
+        print(f"           account_type: credit_card  # or 'bank'")
         print(f"           format: \"{{date:%m/%d/%Y}},{{description}},{{amount}}\"{C.RESET}")
         print()
         section("Then: Categorize Transactions")
