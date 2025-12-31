@@ -223,7 +223,7 @@ COSTCO[amount>200],Costco Bulk,Shopping,Bulk,
 
 Run `tally run` to migrate to the new format.
 
-**Tags** are optional, pipe-separated labels for filtering:
+**Tags** are optional, comma-separated labels for filtering:
 - Use cases: `business`, `reimbursable`, `entertainment`, `recurring`, `tax-deductible`
 - Filter in UI: Click tag badges or type `t:business` in search
 - Filter in CLI: `tally explain --tags business,reimbursable`

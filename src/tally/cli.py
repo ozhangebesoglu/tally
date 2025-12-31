@@ -2432,11 +2432,11 @@ def cmd_explain(args):
                 import json
                 merchants = [build_merchant_json(name, data, verbose) for name, data in merchants_list]
                 merchants.sort(key=lambda x: x['monthly_value'], reverse=True)
-                print(json.dumps({'section': section_match, 'merchants': merchants}, indent=2))
+                print(json.dumps({'view': view_match, 'merchants': merchants}, indent=2))
             else:
                 # Text format
                 merchants_dict = {name: data for name, data in merchants_list}
-                _print_classification_summary(section_match, merchants_dict, verbose, stats['num_months'])
+                _print_classification_summary(view_match, merchants_dict, verbose, stats['num_months'])
         else:
             print("No views.rules found. Run 'tally run' first to generate default sections.")
             sys.exit(1)
