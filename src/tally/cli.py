@@ -265,9 +265,15 @@ STARTER_SECTIONS = '''# Tally Sections Configuration (.sections format)
 #   payments    - list of payment amounts
 #
 # FUNCTIONS:
-#   sum(payments), count(payments), avg(payments)
-#   min(payments), max(payments), stddev(payments)
+#   sum(x), count(x), avg(x), min(x), max(x), stddev(x)
 #   abs(x), round(x)
+#   by(field) - group payments by: month, year, week, day
+#
+# GROUPING:
+#   by("month")           - list of payment lists per month
+#   sum(by("month"))      - list of monthly totals
+#   avg(sum(by("month"))) - average monthly spend
+#   max(sum(by("month"))) - highest spending month
 #
 # OPERATORS:
 #   Comparison: ==  !=  <  <=  >  >=
@@ -1928,7 +1934,8 @@ def cmd_workflow(args):
     print(f"    filter: total > 1000 and months <= 2{C.RESET}")
     print()
     print(f"    {C.DIM}Primitives: months, total, cv, category, subcategory, tags, payments{C.RESET}")
-    print(f"    {C.DIM}Functions: sum(), avg(), count(), min(), max(), stddev(){C.RESET}")
+    print(f"    {C.DIM}Functions: sum(), avg(), count(), min(), max(), stddev(), by(){C.RESET}")
+    print(f"    {C.DIM}Grouping: sum(by(\"month\")) for monthly totals{C.RESET}")
     print()
 
 

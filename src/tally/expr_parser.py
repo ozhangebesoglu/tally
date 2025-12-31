@@ -136,6 +136,7 @@ class ExpressionContext:
             'stddev': self._fn_stddev,
             'abs': abs,
             'round': round,
+            'by': self._fn_by,
         }
 
     def get_payments(self) -> List[float]:
@@ -205,27 +206,75 @@ class ExpressionContext:
         """Get total of all payments."""
         return sum(self.get_payments())
 
-    # Built-in functions
+    def get_by(self, field: str) -> List[List[float]]:
+        """Group payments by a field and return list of lists.
 
-    def _fn_sum(self, values: List[float]) -> float:
+        Supported fields: month, year, day, week
+        """
+        field = field.lower()
+        groups: Dict[str, List[float]] = {}
+
+        for t in self.transactions:
+            if 'date' not in t:
+                continue
+
+            if field == 'month':
+                key = t['date'].strftime('%Y-%m')
+            elif field == 'year':
+                key = t['date'].strftime('%Y')
+            elif field == 'day':
+                key = t['date'].strftime('%Y-%m-%d')
+            elif field == 'week':
+                key = t['date'].strftime('%Y-W%W')
+            else:
+                raise ExpressionError(f"Unknown grouping field: {field}. Use: month, year, day, week")
+
+            groups.setdefault(key, []).append(t['amount'])
+
+        # Return groups sorted by key for consistent ordering
+        return [groups[k] for k in sorted(groups.keys())]
+
+    # Built-in functions (auto-map over nested lists)
+
+    def _is_nested(self, values) -> bool:
+        """Check if values is a list of lists."""
+        return values and isinstance(values, list) and values and isinstance(values[0], list)
+
+    def _fn_sum(self, values: List[float]):
+        if self._is_nested(values):
+            return [sum(group) if group else 0 for group in values]
         return sum(values) if values else 0
 
-    def _fn_count(self, values: List[float]) -> int:
+    def _fn_count(self, values: List[float]):
+        if self._is_nested(values):
+            return [len(group) for group in values]
         return len(values)
 
-    def _fn_avg(self, values: List[float]) -> float:
+    def _fn_avg(self, values: List[float]):
+        if self._is_nested(values):
+            return [sum(g) / len(g) if g else 0 for g in values]
         return sum(values) / len(values) if values else 0
 
-    def _fn_max(self, values: List[float]) -> float:
+    def _fn_max(self, values: List[float]):
+        if self._is_nested(values):
+            return [max(group) if group else 0 for group in values]
         return max(values) if values else 0
 
-    def _fn_min(self, values: List[float]) -> float:
+    def _fn_min(self, values: List[float]):
+        if self._is_nested(values):
+            return [min(group) if group else 0 for group in values]
         return min(values) if values else 0
 
-    def _fn_stddev(self, values: List[float]) -> float:
+    def _fn_stddev(self, values: List[float]):
+        if self._is_nested(values):
+            return [statistics.stdev(g) if len(g) >= 2 else 0 for g in values]
         if len(values) < 2:
             return 0
         return statistics.stdev(values)
+
+    def _fn_by(self, field: str) -> List[List[float]]:
+        """Group payments by field. Returns list of lists."""
+        return self.get_by(field)
 
 
 class ExpressionEvaluator:
@@ -273,8 +322,6 @@ class ExpressionEvaluator:
             return self.ctx.get_cv()
         if name == 'total':
             return self.ctx.get_total()
-        if name == 'is_consistent':
-            return self.ctx.get_is_consistent()
         if name == 'true':
             return True
         if name == 'false':

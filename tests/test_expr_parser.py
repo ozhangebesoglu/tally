@@ -598,3 +598,187 @@ class TestPreParsedAST:
         assert evaluate_ast(tree, ctx1) is True  # Food, sum=110 > 100
         assert evaluate_ast(tree, ctx2) is False  # Bills, not Food
         assert evaluate_ast(tree, ctx3) is True  # Food, sum=150 > 100
+
+
+# =============================================================================
+# Group By Tests
+# =============================================================================
+
+def make_monthly_transactions(monthly_amounts):
+    """Create transactions with specific amounts per month.
+
+    Args:
+        monthly_amounts: dict of {month: [amounts]} or list of (month, amount) tuples
+    """
+    txns = []
+    if isinstance(monthly_amounts, dict):
+        for month, amounts in monthly_amounts.items():
+            for amount in amounts:
+                txns.append({
+                    'amount': amount,
+                    'date': date(2025, month, 15),
+                    'category': 'Food',
+                    'subcategory': 'Grocery',
+                    'merchant': 'Test',
+                    'tags': [],
+                })
+    return txns
+
+
+class TestByFunction:
+    """Test the by() grouping function."""
+
+    def test_by_month_basic(self):
+        """by('month') returns list of payment lists grouped by month."""
+        txns = make_monthly_transactions({
+            1: [100, 200],  # January: 2 transactions
+            2: [150],       # February: 1 transaction
+            3: [75, 125],   # March: 2 transactions
+        })
+        ctx = create_context(transactions=txns)
+        result = evaluate("by('month')", ctx)
+
+        # Should return 3 groups (one per month)
+        assert len(result) == 3
+        # Groups are sorted by month key
+        assert result[0] == [100, 200]  # Jan
+        assert result[1] == [150]       # Feb
+        assert result[2] == [75, 125]   # Mar
+
+    def test_by_month_empty(self):
+        """by('month') with no transactions returns empty list."""
+        ctx = create_context(transactions=[])
+        result = evaluate("by('month')", ctx)
+        assert result == []
+
+    def test_by_invalid_field(self):
+        """by() with invalid field raises error."""
+        txns = make_monthly_transactions({1: [100]})
+        ctx = create_context(transactions=txns)
+        with pytest.raises(ExpressionError, match="Unknown grouping field"):
+            evaluate("by('invalid')", ctx)
+
+
+class TestAutoMapFunctions:
+    """Test that aggregation functions auto-map over nested lists."""
+
+    def test_sum_by_month(self):
+        """sum(by('month')) returns monthly totals."""
+        txns = make_monthly_transactions({
+            1: [100, 200],  # 300
+            2: [150],       # 150
+            3: [75, 125],   # 200
+        })
+        ctx = create_context(transactions=txns)
+        result = evaluate("sum(by('month'))", ctx)
+        assert result == [300, 150, 200]
+
+    def test_count_by_month(self):
+        """count(by('month')) returns transaction counts per month."""
+        txns = make_monthly_transactions({
+            1: [100, 200],  # 2
+            2: [150],       # 1
+            3: [75, 125],   # 2
+        })
+        ctx = create_context(transactions=txns)
+        result = evaluate("count(by('month'))", ctx)
+        assert result == [2, 1, 2]
+
+    def test_avg_by_month(self):
+        """avg(by('month')) returns average per month."""
+        txns = make_monthly_transactions({
+            1: [100, 200],  # avg 150
+            2: [150],       # avg 150
+            3: [100, 200],  # avg 150
+        })
+        ctx = create_context(transactions=txns)
+        result = evaluate("avg(by('month'))", ctx)
+        assert result == [150, 150, 150]
+
+    def test_max_by_month(self):
+        """max(by('month')) returns max per month."""
+        txns = make_monthly_transactions({
+            1: [100, 200],  # max 200
+            2: [150],       # max 150
+            3: [75, 125],   # max 125
+        })
+        ctx = create_context(transactions=txns)
+        result = evaluate("max(by('month'))", ctx)
+        assert result == [200, 150, 125]
+
+    def test_min_by_month(self):
+        """min(by('month')) returns min per month."""
+        txns = make_monthly_transactions({
+            1: [100, 200],  # min 100
+            2: [150],       # min 150
+            3: [75, 125],   # min 75
+        })
+        ctx = create_context(transactions=txns)
+        result = evaluate("min(by('month'))", ctx)
+        assert result == [100, 150, 75]
+
+
+class TestByComposition:
+    """Test composing by() with other functions."""
+
+    def test_avg_sum_by_month(self):
+        """avg(sum(by('month'))) returns average of monthly totals."""
+        txns = make_monthly_transactions({
+            1: [100, 200],  # 300
+            2: [150],       # 150
+            3: [75, 125],   # 200
+        })
+        ctx = create_context(transactions=txns)
+        # Average of [300, 150, 200] = 650/3 ≈ 216.67
+        result = evaluate("avg(sum(by('month')))", ctx)
+        assert abs(result - 216.67) < 0.01
+
+    def test_max_sum_by_month(self):
+        """max(sum(by('month'))) returns highest monthly total."""
+        txns = make_monthly_transactions({
+            1: [100, 200],  # 300
+            2: [150],       # 150
+            3: [75, 125],   # 200
+        })
+        ctx = create_context(transactions=txns)
+        result = evaluate("max(sum(by('month')))", ctx)
+        assert result == 300
+
+    def test_cv_with_by(self):
+        """CV can be computed using by(): stddev(sum(by('month'))) / avg(sum(by('month')))"""
+        txns = make_monthly_transactions({
+            1: [100],  # 100
+            2: [100],  # 100
+            3: [100],  # 100
+        })
+        ctx = create_context(transactions=txns)
+        # All monthly totals are 100, so stddev is 0, CV is 0
+        result = evaluate("stddev(sum(by('month'))) / avg(sum(by('month')))", ctx)
+        assert result == 0
+
+    def test_cv_variable_with_by(self):
+        """CV can be computed with variable: monthly = sum(by('month')); cv = stddev(monthly) / avg(monthly)"""
+        txns = make_monthly_transactions({
+            1: [100],
+            2: [200],
+            3: [300],
+        })
+        ctx = create_context(
+            transactions=txns,
+            variables={'monthly': [100, 200, 300]}  # Pre-computed for test
+        )
+        # Test the formula works
+        result = evaluate("stddev(monthly) / avg(monthly)", ctx)
+        assert result > 0  # Should be non-zero for varying values
+
+    def test_peak_month_ratio(self):
+        """Complex expression: max(sum(by('month'))) / avg(sum(by('month')))"""
+        txns = make_monthly_transactions({
+            1: [100],   # 100
+            2: [100],   # 100
+            3: [400],   # 400 (peak)
+        })
+        ctx = create_context(transactions=txns)
+        # max=400, avg=200, ratio=2.0
+        result = evaluate("max(sum(by('month'))) / avg(sum(by('month')))", ctx)
+        assert result == 2.0

@@ -195,6 +195,39 @@ filter: "business" in tags
 | `tags` | set | Tag strings from merchant rules |
 | `payments` | list | All payment amounts |
 
+**Functions:**
+| Function | Description |
+|----------|-------------|
+| `sum(x)`, `avg(x)`, `count(x)` | Aggregation functions |
+| `min(x)`, `max(x)`, `stddev(x)` | Statistical functions |
+| `abs(x)`, `round(x)` | Math functions |
+| `by(field)` | Group payments by field (month, year, week, day) |
+
+**Grouping with `by()`:**
+
+The `by()` function groups payments by time period. Aggregation functions auto-map over groups:
+```
+by("month")              # [[100, 200], [150], [175, 125]] - grouped payments
+sum(by("month"))         # [300, 150, 300] - monthly totals
+avg(sum(by("month")))    # 250 - average monthly spend
+max(sum(by("month")))    # 300 - highest spending month
+```
+
+**Using variables for complex filters:**
+```
+# Global variables
+monthly = sum(by("month"))
+my_cv = stddev(monthly) / avg(monthly)
+peak_ratio = max(monthly) / avg(monthly)
+
+[Spiky Spending]
+description: Months with unusually high spending
+filter: peak_ratio > 2
+
+[Consistent]
+filter: my_cv < 0.3
+```
+
 **Advanced filter examples:**
 ```
 # High-value inconsistent spending
@@ -212,8 +245,8 @@ filter: category == "Food" and total > 500 and months >= 3
 # Tag-based with amount filter
 filter: "recurring" in tags and avg(payments) > 50
 
-# Combine multiple conditions
-filter: (category == "Shopping" or category == "Food") and cv >= 0.4
+# Monthly analysis
+filter: max(sum(by("month"))) > 1000
 ```
 
 Sections can overlap - the same merchant can appear in multiple sections.
