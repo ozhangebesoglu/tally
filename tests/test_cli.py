@@ -349,3 +349,120 @@ data_sources:
             assert os.path.exists(os.path.join(config_dir, 'merchants.rules'))
 
 
+class TestReferenceCommand:
+    """Tests for the tally reference command."""
+
+    def test_reference_shows_both_topics(self):
+        """Running tally reference shows both merchants and views documentation."""
+        result = subprocess.run(
+            ['uv', 'run', 'tally', 'reference'],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0
+        # Should show merchants reference
+        assert 'MERCHANTS.RULES REFERENCE' in result.stdout
+        # Should show views reference
+        assert 'VIEWS.RULES REFERENCE' in result.stdout
+        # Should show footer with topic options
+        assert 'tally reference merchants' in result.stdout
+        assert 'tally reference views' in result.stdout
+
+    def test_reference_merchants_only(self):
+        """Running tally reference merchants shows only merchant docs."""
+        result = subprocess.run(
+            ['uv', 'run', 'tally', 'reference', 'merchants'],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0
+        assert 'MERCHANTS.RULES REFERENCE' in result.stdout
+        # Should NOT show views reference
+        assert 'VIEWS.RULES REFERENCE' not in result.stdout
+        # Should document all match functions
+        assert 'contains(' in result.stdout
+        assert 'regex(' in result.stdout
+        assert 'normalized(' in result.stdout
+        assert 'anyof(' in result.stdout
+        assert 'startswith(' in result.stdout
+        assert 'fuzzy(' in result.stdout
+
+    def test_reference_views_only(self):
+        """Running tally reference views shows only views docs."""
+        result = subprocess.run(
+            ['uv', 'run', 'tally', 'reference', 'views'],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0
+        assert 'VIEWS.RULES REFERENCE' in result.stdout
+        # Should NOT show merchants reference
+        assert 'MERCHANTS.RULES REFERENCE' not in result.stdout
+        # Should document filter primitives
+        assert 'months' in result.stdout
+        assert 'payments' in result.stdout
+        assert 'total' in result.stdout
+        assert 'cv' in result.stdout
+
+    def test_reference_documents_special_tags(self):
+        """Reference should document special tags (income, transfer, refund)."""
+        result = subprocess.run(
+            ['uv', 'run', 'tally', 'reference', 'merchants'],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0
+        assert 'Special Tags' in result.stdout
+        assert 'income' in result.stdout
+        assert 'transfer' in result.stdout
+        assert 'refund' in result.stdout
+
+    def test_reference_documents_amount_conditions(self):
+        """Reference should document amount and date conditions."""
+        result = subprocess.run(
+            ['uv', 'run', 'tally', 'reference', 'merchants'],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0
+        assert 'amount >' in result.stdout
+        assert 'amount <' in result.stdout
+        assert 'month ==' in result.stdout
+        assert 'date >=' in result.stdout
+
+    def test_reference_documents_aggregate_functions(self):
+        """Reference should document aggregate functions for views."""
+        result = subprocess.run(
+            ['uv', 'run', 'tally', 'reference', 'views'],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0
+        assert 'sum()' in result.stdout
+        assert 'avg()' in result.stdout
+        assert 'count()' in result.stdout
+        assert 'by("month")' in result.stdout
+
+    def test_reference_invalid_topic(self):
+        """Invalid topic should show error with valid choices."""
+        result = subprocess.run(
+            ['uv', 'run', 'tally', 'reference', 'invalid'],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 2
+        assert 'invalid choice' in result.stderr
+        assert 'merchants' in result.stderr
+        assert 'views' in result.stderr
+
+    def test_reference_help(self):
+        """Running tally reference --help shows usage."""
+        result = subprocess.run(
+            ['uv', 'run', 'tally', 'reference', '--help'],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0
+        assert 'merchants' in result.stdout
+        assert 'views' in result.stdout
+

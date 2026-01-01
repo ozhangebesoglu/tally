@@ -2463,6 +2463,318 @@ def cmd_workflow(args):
     print(f"    {C.DIM}Functions: sum(), avg(), count(), min(), max(), stddev(), by(){C.RESET}")
     print(f"    {C.DIM}Grouping: sum(by(\"month\")) for monthly totals{C.RESET}")
     print()
+    print(f"    {C.DIM}Run {C.RESET}{C.GREEN}tally reference{C.RESET}{C.DIM} for complete syntax documentation{C.RESET}")
+    print()
+
+
+def cmd_reference(args):
+    """Show complete rule syntax reference."""
+    topic = args.topic.lower() if args.topic else None
+
+    def header(title):
+        print()
+        print(f"{C.BOLD}{C.CYAN}{'═' * 60}{C.RESET}")
+        print(f"{C.BOLD}{C.CYAN}  {title}{C.RESET}")
+        print(f"{C.BOLD}{C.CYAN}{'═' * 60}{C.RESET}")
+        print()
+
+    def section(title):
+        print()
+        print(f"{C.BOLD}{title}{C.RESET}")
+        print(f"{C.DIM}{'─' * 40}{C.RESET}")
+
+    def show_merchants_reference():
+        header("MERCHANTS.RULES REFERENCE")
+
+        print(f"{C.DIM}File: config/merchants.rules{C.RESET}")
+        print(f"{C.DIM}Purpose: Categorize transactions by matching descriptions{C.RESET}")
+
+        section("Rule Structure")
+        print(f"""
+  {C.CYAN}[Rule Name]{C.RESET}              {C.DIM}# Display name for matched transactions{C.RESET}
+  {C.CYAN}match:{C.RESET} <expression>      {C.DIM}# Required: when to apply this rule{C.RESET}
+  {C.CYAN}category:{C.RESET} <Category>     {C.DIM}# Required: primary grouping{C.RESET}
+  {C.CYAN}subcategory:{C.RESET} <Sub>       {C.DIM}# Optional: secondary grouping{C.RESET}
+  {C.CYAN}tags:{C.RESET} tag1, tag2         {C.DIM}# Optional: labels for filtering{C.RESET}
+""")
+
+        section("Match Functions")
+        funcs = [
+            ('contains("text")', 'Case-insensitive substring match',
+             'match: contains("NETFLIX")', 'Matches "NETFLIX.COM", "netflix", etc.'),
+            ('regex("pattern")', 'Perl-compatible regex',
+             'match: regex("UBER\\\\s(?!EATS)")', 'Matches "UBER TRIP" but not "UBER EATS"'),
+            ('normalized("text")', 'Ignores spaces, hyphens, punctuation',
+             'match: normalized("WHOLEFOODS")', 'Matches "WHOLE FOODS", "WHOLE-FOODS", etc.'),
+            ('anyof("a", "b", ...)', 'Match any of multiple patterns',
+             'match: anyof("NETFLIX", "HULU", "HBO")', 'Matches any streaming service'),
+            ('startswith("text")', 'Match only at beginning',
+             'match: startswith("AMZN")', 'Matches "AMZN MKTP" but not "PAY AMZN"'),
+            ('fuzzy("text")', 'Approximate matching (typos)',
+             'match: fuzzy("STARBUCKS")', 'Matches "STARBUKS", "STARBUCK" (80% similar)'),
+            ('fuzzy("text", 0.90)', 'Fuzzy with custom threshold',
+             'match: fuzzy("COSTCO", 0.90)', 'Requires 90% similarity'),
+        ]
+        for func, desc, example, note in funcs:
+            print(f"  {C.GREEN}{func}{C.RESET}")
+            print(f"    {desc}")
+            print(f"    {C.DIM}Example: {example}{C.RESET}")
+            print(f"    {C.DIM}→ {note}{C.RESET}")
+            print()
+
+        section("Amount & Date Conditions")
+        conditions = [
+            ('amount > 100', 'Transactions over $100'),
+            ('amount <= 50', 'Transactions $50 or less'),
+            ('amount < 0', 'Credits/refunds (negative amounts)'),
+            ('month == 12', 'December transactions only'),
+            ('month >= 11', 'November and December'),
+            ('year == 2024', 'Specific year'),
+            ('day == 1', 'First of the month'),
+            ('date >= "2024-01-01"', 'On or after a specific date'),
+            ('date < "2024-06-01"', 'Before a specific date'),
+        ]
+        for cond, desc in conditions:
+            print(f"  {C.GREEN}{cond:<28}{C.RESET} {C.DIM}{desc}{C.RESET}")
+
+        section("Combining Conditions")
+        print(f"""
+  {C.GREEN}and{C.RESET}   Both conditions must be true
+        {C.DIM}match: contains("COSTCO") and amount > 200{C.RESET}
+
+  {C.GREEN}or{C.RESET}    Either condition can be true
+        {C.DIM}match: contains("SHELL") or contains("CHEVRON"){C.RESET}
+
+  {C.GREEN}not{C.RESET}   Negates a condition
+        {C.DIM}match: contains("UBER") and not contains("EATS"){C.RESET}
+
+  {C.GREEN}( ){C.RESET}   Group conditions
+        {C.DIM}match: (contains("AMAZON") or contains("AMZN")) and amount > 100{C.RESET}
+""")
+
+        section("Variables")
+        print(f"""
+  Define reusable conditions at the top of your file:
+
+  {C.CYAN}is_large = amount > 500{C.RESET}
+  {C.CYAN}is_holiday = month >= 11 and month <= 12{C.RESET}
+  {C.CYAN}is_coffee = anyof("STARBUCKS", "PEETS", "PHILZ"){C.RESET}
+
+  Then use in rules:
+  {C.DIM}[Holiday Splurge]{C.RESET}
+  {C.DIM}match: is_large and is_holiday{C.RESET}
+  {C.DIM}category: Shopping{C.RESET}
+""")
+
+        section("Special Tags")
+        print(f"""
+  These tags have special meaning in the spending report:
+
+  {C.CYAN}income{C.RESET}     Money coming in (salary, interest, deposits)
+             {C.DIM}→ Excluded from spending totals{C.RESET}
+
+  {C.CYAN}transfer{C.RESET}   Moving money between accounts (CC payments, transfers)
+             {C.DIM}→ Excluded from spending totals{C.RESET}
+
+  {C.CYAN}refund{C.RESET}     Returns and credits on purchases
+             {C.DIM}→ Shown in "Credits Applied" section, nets against spending{C.RESET}
+""")
+
+        section("Rule Priority")
+        print(f"""
+  {C.BOLD}First match wins{C.RESET} — put specific patterns before general ones:
+
+  {C.DIM}[Uber Eats]                    # ← More specific, checked first{C.RESET}
+  {C.DIM}match: contains("UBER EATS"){C.RESET}
+  {C.DIM}category: Food{C.RESET}
+
+  {C.DIM}[Uber Rides]                   # ← Less specific, checked second{C.RESET}
+  {C.DIM}match: contains("UBER"){C.RESET}
+  {C.DIM}category: Transportation{C.RESET}
+
+  {C.BOLD}Tags accumulate{C.RESET} — if multiple rules could match, use 'and' with 'not':
+  {C.DIM}match: contains("UBER") and not contains("EATS"){C.RESET}
+""")
+
+        section("Complete Example")
+        print(f"""{C.DIM}# === Variables ===
+is_large = amount > 500
+
+# === Subscriptions ===
+
+[Netflix]
+match: contains("NETFLIX")
+category: Subscriptions
+subcategory: Streaming
+tags: entertainment
+
+[Spotify]
+match: contains("SPOTIFY")
+category: Subscriptions
+subcategory: Music
+tags: entertainment
+
+# === Food ===
+
+[Costco Grocery]
+match: contains("COSTCO") and amount <= 200
+category: Food
+subcategory: Grocery
+
+[Costco Bulk]
+match: contains("COSTCO") and is_large
+category: Shopping
+subcategory: Wholesale
+
+# === Special Handling ===
+
+[Salary]
+match: contains("PAYROLL") or contains("DIRECT DEP")
+category: Income
+subcategory: Salary
+tags: income
+
+[CC Payment]
+match: contains("PAYMENT THANK YOU")
+category: Finance
+subcategory: Credit Card
+tags: transfer
+
+[Amazon Refund]
+match: contains("AMAZON") and amount < 0
+category: Shopping
+subcategory: Online
+tags: refund{C.RESET}
+""")
+
+    def show_views_reference():
+        header("VIEWS.RULES REFERENCE")
+
+        print(f"{C.DIM}File: config/views.rules{C.RESET}")
+        print(f"{C.DIM}Purpose: Create custom sections in the spending report{C.RESET}")
+
+        section("View Structure")
+        print(f"""
+  {C.CYAN}[View Name]{C.RESET}                {C.DIM}# Section header in report{C.RESET}
+  {C.CYAN}description:{C.RESET} <text>        {C.DIM}# Optional: subtitle under header{C.RESET}
+  {C.CYAN}filter:{C.RESET} <expression>       {C.DIM}# Required: which merchants to include{C.RESET}
+""")
+
+        section("Filter Primitives")
+        primitives = [
+            ('months', 'Number of months with transactions', 'filter: months >= 6'),
+            ('payments', 'Total number of transactions', 'filter: payments >= 12'),
+            ('total', 'Total spending for this merchant', 'filter: total > 1000'),
+            ('cv', 'Coefficient of variation (consistency)', 'filter: cv < 0.3'),
+            ('category', 'Merchant category', 'filter: category == "Subscriptions"'),
+            ('subcategory', 'Merchant subcategory', 'filter: subcategory == "Streaming"'),
+            ('tags', 'Merchant tags (contains check)', 'filter: tags has "business"'),
+        ]
+        for prim, desc, example in primitives:
+            print(f"  {C.GREEN}{prim:<12}{C.RESET} {desc}")
+            print(f"             {C.DIM}{example}{C.RESET}")
+            print()
+
+        section("Aggregate Functions")
+        funcs = [
+            ('sum()', 'Total of all values', 'sum(by("month"))'),
+            ('avg()', 'Average value', 'avg(by("month"))'),
+            ('count()', 'Number of items', 'count(by("month"))'),
+            ('min()', 'Minimum value', 'min(by("month"))'),
+            ('max()', 'Maximum value', 'max(by("month"))'),
+            ('stddev()', 'Standard deviation', 'stddev(by("month"))'),
+        ]
+        for func, desc, example in funcs:
+            print(f"  {C.GREEN}{func:<12}{C.RESET} {desc:<24} {C.DIM}{example}{C.RESET}")
+
+        section("Grouping with by()")
+        print(f"""
+  {C.GREEN}by("month"){C.RESET}    Group transactions by month
+  {C.GREEN}by("year"){C.RESET}     Group transactions by year
+  {C.GREEN}by("day"){C.RESET}      Group transactions by day
+
+  Examples:
+    {C.DIM}filter: sum(by("month")) > 100     # At least $100/month{C.RESET}
+    {C.DIM}filter: count(by("month")) >= 1    # Transaction every month{C.RESET}
+    {C.DIM}filter: avg(by("month")) > 50      # Averages over $50/month{C.RESET}
+""")
+
+        section("Comparison Operators")
+        print(f"""
+  {C.GREEN}=={C.RESET}  Equal to            {C.DIM}category == "Food"{C.RESET}
+  {C.GREEN}!={C.RESET}  Not equal to        {C.DIM}category != "Transfers"{C.RESET}
+  {C.GREEN}>{C.RESET}   Greater than        {C.DIM}total > 500{C.RESET}
+  {C.GREEN}>={C.RESET}  Greater or equal    {C.DIM}months >= 6{C.RESET}
+  {C.GREEN}<{C.RESET}   Less than           {C.DIM}cv < 0.3{C.RESET}
+  {C.GREEN}<={C.RESET}  Less or equal       {C.DIM}payments <= 12{C.RESET}
+""")
+
+        section("Logical Operators")
+        print(f"""
+  {C.GREEN}and{C.RESET}   Both conditions       {C.DIM}months >= 6 and cv < 0.3{C.RESET}
+  {C.GREEN}or{C.RESET}    Either condition      {C.DIM}category == "Bills" or tags has "recurring"{C.RESET}
+  {C.GREEN}not{C.RESET}   Negation              {C.DIM}not category == "Income"{C.RESET}
+  {C.GREEN}has{C.RESET}   Contains (for tags)   {C.DIM}tags has "business"{C.RESET}
+""")
+
+        section("View Examples")
+        print(f"""{C.DIM}# Consistent monthly expenses
+[Every Month]
+description: Bills that hit every month
+filter: months >= 6 and cv < 0.3
+
+# Large one-time purchases
+[Big Purchases]
+description: Major one-time expenses
+filter: total > 1000 and months <= 2
+
+# Subscriptions by category
+[Streaming]
+filter: category == "Subscriptions" and subcategory == "Streaming"
+
+# Business expenses for reimbursement
+[Business]
+description: Expenses to submit for reimbursement
+filter: tags has "business"
+
+# Variable recurring (same merchant, different amounts)
+[Utilities]
+description: Recurring with variable amounts
+filter: months >= 6 and cv >= 0.3 and cv < 1.0
+
+# High-frequency spending
+[Daily Habits]
+description: Places you visit frequently
+filter: payments >= 20 and total > 200{C.RESET}
+""")
+
+        section("Views vs Categories")
+        print(f"""
+  {C.BOLD}Categories{C.RESET} (in merchants.rules): Define WHAT a transaction is
+    {C.DIM}→ Each transaction has exactly one category{C.RESET}
+
+  {C.BOLD}Views{C.RESET} (in views.rules): Define HOW to group for reporting
+    {C.DIM}→ Same merchant can appear in multiple views{C.RESET}
+    {C.DIM}→ Views are optional — report works without them{C.RESET}
+""")
+
+    # Main output logic
+    if topic == 'merchants':
+        show_merchants_reference()
+    elif topic == 'views':
+        show_views_reference()
+    else:
+        # Show both
+        show_merchants_reference()
+        show_views_reference()
+
+        # Footer
+        print()
+        print(f"{C.DIM}{'─' * 60}{C.RESET}")
+        print(f"  {C.DIM}For specific topics:{C.RESET}")
+        print(f"    {C.GREEN}tally reference merchants{C.RESET}  {C.DIM}Merchant rules only{C.RESET}")
+        print(f"    {C.GREEN}tally reference views{C.RESET}      {C.DIM}View definitions only{C.RESET}")
+        print()
 
 
 def cmd_update(args):
@@ -3486,6 +3798,19 @@ def main():
         description='Detects current state and shows relevant next steps.'
     )
 
+    # reference subcommand
+    reference_parser = subparsers.add_parser(
+        'reference',
+        help='Show complete rule syntax reference for merchants.rules and views.rules',
+        description='Display comprehensive documentation for the rule engine syntax.'
+    )
+    reference_parser.add_argument(
+        'topic',
+        nargs='?',
+        choices=['merchants', 'views'],
+        help='Specific topic to show (default: show all)'
+    )
+
     # version subcommand
     subparsers.add_parser(
         'version',
@@ -3550,6 +3875,8 @@ def main():
         cmd_explain(args)
     elif args.command == 'workflow':
         cmd_workflow(args)
+    elif args.command == 'reference':
+        cmd_reference(args)
     elif args.command == 'version':
         sha_display = GIT_SHA[:8] if GIT_SHA != 'unknown' else 'unknown'
         print(f"tally {VERSION} ({sha_display})")
