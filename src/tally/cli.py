@@ -2414,6 +2414,16 @@ def cmd_workflow(args):
     print(f"    {C.GREEN}tally reference merchants{C.RESET}  {C.DIM}Merchant rules only{C.RESET}")
     print(f"    {C.GREEN}tally reference views{C.RESET}      {C.DIM}View definitions only{C.RESET}")
 
+    section("Special Tags")
+    print(f"    {C.DIM}These tags affect how transactions appear in your report:{C.RESET}")
+    print()
+    print(f"    {C.CYAN}income{C.RESET}     {C.DIM}Salary, deposits, interest → excluded from spending{C.RESET}")
+    print(f"    {C.CYAN}transfer{C.RESET}   {C.DIM}CC payments, account transfers → excluded from spending{C.RESET}")
+    print(f"    {C.CYAN}refund{C.RESET}     {C.DIM}Returns and credits → shown in Credits Applied section{C.RESET}")
+    print()
+    print(f"    {C.DIM}Example:{C.RESET}")
+    print(f"    {C.DIM}  [Paycheck] match: contains(\"PAYROLL\") tags: income{C.RESET}")
+
     section("Best Practices")
     print(f"    {C.YELLOW}{C.BOLD}RULES ARE ORDERED — FIRST MATCH WINS{C.RESET}")
     print(f"    {C.DIM}Put specific rules before general ones (e.g., \"Uber Eats\" before \"Uber\"){C.RESET}")
