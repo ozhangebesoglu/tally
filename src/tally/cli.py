@@ -2365,11 +2365,8 @@ def cmd_workflow(args):
         print(f"    {C.DIM}1.{C.RESET} Get unknown merchants with suggested rules:")
         print(f"       {C.GREEN}tally discover --format json{C.RESET}")
         print()
-        print(f"    {C.DIM}2.{C.RESET} Add rules to {C.CYAN}{path_merchants}{C.RESET}:")
-        print(f"       {C.DIM}[Starbucks]")
-        print(f"       match: contains(\"STARBUCKS\")")
-        print(f"       category: Food")
-        print(f"       subcategory: Coffee{C.RESET}")
+        print(f"    {C.DIM}2.{C.RESET} Add rules to {C.CYAN}{path_merchants}{C.RESET}")
+        print(f"       {C.YELLOW}READ the Best Practices below first!{C.RESET}")
         print()
         print(f"    {C.DIM}3.{C.RESET} Check progress:")
         print(f"       {C.GREEN}tally run --summary{C.RESET}")
@@ -2387,11 +2384,6 @@ def cmd_workflow(args):
     ]
     for cmd, desc in cmds:
         print(f"    {C.GREEN}{cmd:<24}{C.RESET} {C.DIM}{desc}{C.RESET}")
-
-    section("Debugging Rules")
-    print(f"    {C.GREEN}tally explain Amazon{C.RESET}           {C.DIM}See how Amazon is classified{C.RESET}")
-    print(f"    {C.GREEN}tally explain Amazon -v{C.RESET}        {C.DIM}Show raw description variations{C.RESET}")
-    print(f"    {C.GREEN}tally explain \"RAW DESC\"{C.RESET}       {C.DIM}Trace how a description matches{C.RESET}")
 
     section("Description Cleaning")
     print(f"    {C.DIM}Strip payment processor prefixes before matching rules.{C.RESET}")
