@@ -1,7 +1,225 @@
 // spending_report.js - Vue 3 app for spending report
 // This file is embedded into the HTML at build time by analyzer.py
 
-const { createApp, ref, reactive, computed, watch, onMounted, nextTick } = Vue;
+const { createApp, ref, reactive, computed, watch, onMounted, nextTick, defineComponent } = Vue;
+
+// ========== REUSABLE COMPONENTS ==========
+
+// Sortable merchant/group section component
+// Reusable for Credits, Excluded, and Category sections
+const MerchantSection = defineComponent({
+    name: 'MerchantSection',
+    props: {
+        sectionKey: { type: String, required: true },
+        title: { type: String, required: true },
+        items: { type: Array, required: true },
+        totalLabel: { type: String, default: 'Total' },
+        showTotal: { type: Boolean, default: false },
+        totalAmount: { type: Number, default: 0 },
+        subtitle: { type: String, default: '' },
+        creditMode: { type: Boolean, default: false },
+        // Category mode adds % column and different formatting
+        categoryMode: { type: Boolean, default: false },
+        categoryTotal: { type: Number, default: 0 },
+        grandTotal: { type: Number, default: 0 },
+        numMonths: { type: Number, default: 12 },
+        headerColor: { type: String, default: '' },
+        // Injected from parent
+        collapsedSections: { type: Object, required: true },
+        sortConfig: { type: Object, required: true },
+        expandedItems: { type: Object, required: true },
+        toggleSection: { type: Function, required: true },
+        toggleSort: { type: Function, required: true },
+        formatCurrency: { type: Function, required: true },
+        formatDate: { type: Function, required: true },
+        formatPct: { type: Function, default: null },
+        addFilter: { type: Function, required: true },
+        getLocationClass: { type: Function, default: null }
+    },
+    computed: {
+        // Label spans first 4 columns in all modes
+        colSpan() {
+            return 4;
+        },
+        // Transaction row spans all columns
+        totalColSpan() {
+            return this.categoryMode ? 6 : 5;
+        }
+    },
+    template: `
+        <section :class="[sectionKey.replace(':', '-') + '-section', 'category-section']">
+            <div class="section-header" @click="toggleSection(sectionKey)">
+                <h2>
+                    <span class="toggle">{{ collapsedSections.has(sectionKey) ? '▶' : '▼' }}</span>
+                    <span v-if="headerColor" class="category-dot" :style="{ backgroundColor: headerColor }"></span>
+                    {{ title }}
+                </h2>
+                <span class="section-total">
+                    <template v-if="categoryMode">
+                        <span class="section-monthly">{{ formatCurrency(totalAmount / numMonths) }}/mo</span> ·
+                        <span class="section-ytd">{{ formatCurrency(totalAmount) }}</span>
+                        <span class="section-pct">({{ formatPct(totalAmount, grandTotal) }})</span>
+                    </template>
+                    <template v-else>
+                        <span v-if="showTotal" class="section-ytd credit-amount">+{{ formatCurrency(totalAmount) }}</span>
+                        <span class="section-pct">{{ subtitle }}</span>
+                    </template>
+                </span>
+            </div>
+            <div class="section-content" :class="{ collapsed: collapsedSections.has(sectionKey) }">
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th @click.stop="toggleSort(sectionKey, 'merchant')"
+                                    :class="getSortClass('merchant')">{{ creditMode ? 'Source' : 'Merchant' }}</th>
+                                <th @click.stop="toggleSort(sectionKey, 'subcategory')"
+                                    :class="getSortClass('subcategory')">{{ categoryMode ? 'Subcategory' : 'Category' }}</th>
+                                <!-- Category mode: Count then Tags; Other modes: Tags then Count -->
+                                <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
+                                    :class="getSortClass('count')">Count</th>
+                                <th>Tags</th>
+                                <th v-if="!categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
+                                    :class="getSortClass('count')">Count</th>
+                                <th class="money" @click.stop="toggleSort(sectionKey, 'total')"
+                                    :class="getSortClass('total')">{{ creditMode ? 'Amount' : 'Total' }}</th>
+                                <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'total')"
+                                    :class="getSortClass('total')">%</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template v-for="(item, idx) in items" :key="item.id || idx">
+                                <tr class="merchant-row"
+                                    :class="{ expanded: isExpanded(item.id || idx) }"
+                                    @click="toggleExpand(item.id || idx)">
+                                    <td class="merchant" :class="{ clickable: categoryMode }">
+                                        <span class="chevron">{{ isExpanded(item.id || idx) ? '▼' : '▶' }}</span>
+                                        <span v-if="categoryMode" @click.stop="addFilter(item.id, 'merchant', item.displayName)">
+                                            {{ item.displayName || item.merchant }}
+                                        </span>
+                                        <span v-else>{{ item.displayName || item.merchant }}</span>
+                                    </td>
+                                    <td class="category" :class="{ clickable: categoryMode }"
+                                        @click.stop="categoryMode && addFilter(item.subcategory, 'category')">
+                                        {{ item.subcategory }}
+                                    </td>
+                                    <!-- Category mode: Count then Tags; Other modes: Tags then Count -->
+                                    <td v-if="categoryMode">{{ item.filteredCount || item.count }}</td>
+                                    <td class="tags-cell">
+                                        <span v-for="tag in getTags(item)" :key="tag" class="tag-badge"
+                                              @click.stop="addFilter(tag, 'tag')">{{ tag }}</span>
+                                    </td>
+                                    <td v-if="!categoryMode">{{ item.filteredCount || item.count }}</td>
+                                    <td class="money" :class="getAmountClass(item)">
+                                        {{ formatAmount(item) }}
+                                    </td>
+                                    <td v-if="categoryMode" class="pct">{{ formatPct(item.filteredTotal || item.total, categoryTotal || totalAmount) }}</td>
+                                </tr>
+                                <tr v-for="txn in getTransactions(item)"
+                                    :key="txn.id"
+                                    class="txn-row"
+                                    :class="{ hidden: !isExpanded(item.id || idx) }">
+                                    <td :colspan="totalColSpan">
+                                        <div class="txn-detail">
+                                            <span class="txn-date">{{ formatDate(txn.date) }}</span>
+                                            <span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span>
+                                            <span class="txn-desc">{{ txn.description }}</span>
+                                            <span class="txn-amount" :class="getTxnAmountClass(txn)">
+                                                {{ formatTxnAmount(txn) }}
+                                            </span>
+                                            <span v-if="categoryMode && txn.amount < 0" class="txn-badge refund">REFUND</span>
+                                            <span v-if="txn.location && getLocationClass"
+                                                  class="txn-location clickable"
+                                                  :class="getLocationClass(txn.location)"
+                                                  @click.stop="addFilter(txn.location, 'location')">
+                                                {{ txn.location }}
+                                            </span>
+                                            <span v-for="tag in (txn.tags || [])"
+                                                  :key="tag"
+                                                  class="tag-badge"
+                                                  @click.stop="addFilter(tag, 'tag')">{{ tag }}</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr class="total-row">
+                                <td :colspan="colSpan">{{ totalLabel }}</td>
+                                <td class="money" :class="{ 'credit-amount': creditMode }">
+                                    {{ creditMode ? '+' + formatCurrency(totalAmount) : formatCurrency(totalAmount) }}
+                                </td>
+                                <td v-if="categoryMode" class="pct">100%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    `,
+    methods: {
+        getSortClass(column) {
+            const cfg = this.sortConfig[this.sectionKey];
+            return {
+                'sorted-asc': cfg?.column === column && cfg?.dir === 'asc',
+                'sorted-desc': cfg?.column === column && cfg?.dir === 'desc'
+            };
+        },
+        toggleExpand(id) {
+            if (this.expandedItems.has(id)) {
+                this.expandedItems.delete(id);
+            } else {
+                this.expandedItems.add(id);
+            }
+        },
+        isExpanded(id) {
+            return this.expandedItems.has(id);
+        },
+        getTags(item) {
+            if (item.filteredTxns) {
+                return [...new Set(item.filteredTxns.flatMap(t => t.tags || []))];
+            }
+            return item.tags || [];
+        },
+        getTransactions(item) {
+            return item.filteredTxns || item.transactions || [];
+        },
+        getAmountClass(item) {
+            if (this.creditMode) return 'credit-amount';
+            const tags = item.tags || [];
+            const total = item.total || item.filteredTotal || 0;
+            if (tags.includes('income')) return 'income-amount';
+            if (total < 0 && !tags.includes('income')) return 'negative-amount';
+            return '';
+        },
+        getTxnAmountClass(txn) {
+            if (this.creditMode) return 'credit-amount';
+            const tags = txn.tags || [];
+            if (tags.includes('income')) return 'income-amount';
+            if (txn.amount < 0 && !tags.includes('income')) return 'negative-amount';
+            return '';
+        },
+        formatAmount(item) {
+            if (this.creditMode) {
+                return '+' + this.formatCurrency(item.creditAmount || Math.abs(item.filteredTotal || item.total || 0));
+            }
+            const tags = item.tags || [];
+            const total = item.total || item.filteredTotal || 0;
+            if (tags.includes('income')) {
+                return '+' + this.formatCurrency(Math.abs(total));
+            }
+            return this.formatCurrency(total);
+        },
+        formatTxnAmount(txn) {
+            if (this.creditMode) {
+                return '+' + this.formatCurrency(Math.abs(txn.amount));
+            }
+            const tags = txn.tags || [];
+            if (tags.includes('income')) {
+                return '+' + this.formatCurrency(Math.abs(txn.amount));
+            }
+            return this.formatCurrency(txn.amount);
+        }
+    }
+});
 
 // Category colors for charts
 const CATEGORY_COLORS = [
@@ -209,8 +427,38 @@ createApp({
             return result;
         });
 
+        // Sort an array of groups/merchants by configurable column and direction
+        // Works with arrays from creditMerchants, groupedExcluded, etc.
+        function sortGroupedArray(items, configKey) {
+            const cfg = sortConfig[configKey] || { column: 'total', dir: 'desc' };
+            return [...items].sort((a, b) => {
+                let vA, vB;
+                switch (cfg.column) {
+                    case 'merchant':
+                        vA = (a.displayName || a.merchant || '').toLowerCase();
+                        vB = (b.displayName || b.merchant || '').toLowerCase();
+                        break;
+                    case 'subcategory':
+                        vA = (a.subcategory || '').toLowerCase();
+                        vB = (b.subcategory || '').toLowerCase();
+                        break;
+                    case 'count':
+                        vA = a.filteredCount || a.count || 0;
+                        vB = b.filteredCount || b.count || 0;
+                        break;
+                    default:
+                        vA = Math.abs(a.creditAmount || a.filteredTotal || a.total || 0);
+                        vB = Math.abs(b.creditAmount || b.filteredTotal || b.total || 0);
+                }
+                if (typeof vA === 'string') {
+                    return cfg.dir === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA);
+                }
+                return cfg.dir === 'asc' ? vA - vB : vB - vA;
+            });
+        }
+
         // Credit merchants (negative totals, shown separately)
-        const creditMerchants = computed(() => {
+        const unsortedCreditMerchants = computed(() => {
             const credits = [];
             for (const [catName, category] of Object.entries(filteredCategoryView.value)) {
                 for (const [subName, subcat] of Object.entries(category.filteredSubcategories || {})) {
@@ -227,8 +475,10 @@ createApp({
                     }
                 }
             }
-            return credits.sort((a, b) => b.creditAmount - a.creditAmount);
+            return credits;
         });
+
+        const creditMerchants = computed(() => sortGroupedArray(unsortedCreditMerchants.value, 'credits'));
 
         // Check if sections are defined
         const hasSections = computed(() => {
@@ -382,7 +632,7 @@ createApp({
             return Math.abs(incomeTotal.value) - grandTotal.value - Math.abs(transfersTotal.value);
         });
 
-        // Group transactions by merchant helper
+        // Group transactions by merchant helper (returns unsorted)
         function groupByMerchant(transactions) {
             const groups = {};
             for (const txn of transactions) {
@@ -402,10 +652,11 @@ createApp({
                 groups[key].total += txn.amount;
                 groups[key].count++;
             }
-            return Object.values(groups).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+            return Object.values(groups);
         }
 
-        const groupedExcluded = computed(() => groupByMerchant(filteredExcluded.value));
+        const unsortedExcluded = computed(() => groupByMerchant(filteredExcluded.value));
+        const groupedExcluded = computed(() => sortGroupedArray(unsortedExcluded.value, 'excluded'));
         const expandedExcluded = reactive(new Set());
         const showExcluded = ref(false);
 
@@ -741,7 +992,7 @@ createApp({
             }
         }
 
-        // Sort merchants by configurable column and direction
+        // Sort merchants by configurable column and direction (for object-based sections)
         function sortMerchantEntries(merchants, column, dir) {
             return Object.entries(merchants || {})
                 .sort((a, b) => {
@@ -1190,4 +1441,6 @@ createApp({
             toggleTheme, scrollToExcluded
         };
     }
-}).mount('#app');
+})
+.component('merchant-section', MerchantSection)
+.mount('#app');

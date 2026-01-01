@@ -168,335 +168,94 @@
 
             <!-- Section View -->
             <template v-if="currentView === 'section' && hasSections">
-                <template v-for="(section, sectionId) in filteredSectionView" :key="sectionId">
-                    <section class="category-section">
-                        <div class="section-header" @click="toggleSection('sec:' + sectionId)">
-                            <h2>
-                                <span class="toggle">{{ collapsedSections.has('sec:' + sectionId) ? '▶' : '▼' }}</span>
-                                {{ section.title }}
-                            </h2>
-                            <span class="section-total">
-                                <span class="section-monthly">{{ formatCurrency(section.filteredTotal / numFilteredMonths) }}/mo</span> ·
-                                <span class="section-ytd">{{ formatCurrency(section.filteredTotal) }}</span>
-                                <span class="section-pct">({{ formatPct(section.filteredTotal, grandTotal) }})</span>
-                            </span>
-                        </div>
-                        <div class="section-content" :class="{ collapsed: collapsedSections.has('sec:' + sectionId) }">
-                            <div class="table-wrapper">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th @click="toggleSort('sec:' + sectionId, 'merchant')"
-                                                :class="{ 'sorted-asc': sortConfig['sec:' + sectionId]?.column === 'merchant' && sortConfig['sec:' + sectionId]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['sec:' + sectionId]?.column === 'merchant' && sortConfig['sec:' + sectionId]?.dir === 'desc' }">Merchant</th>
-                                            <th @click="toggleSort('sec:' + sectionId, 'subcategory')"
-                                                :class="{ 'sorted-asc': sortConfig['sec:' + sectionId]?.column === 'subcategory' && sortConfig['sec:' + sectionId]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['sec:' + sectionId]?.column === 'subcategory' && sortConfig['sec:' + sectionId]?.dir === 'desc' }">Subcategory</th>
-                                            <th @click="toggleSort('sec:' + sectionId, 'count')"
-                                                :class="{ 'sorted-asc': sortConfig['sec:' + sectionId]?.column === 'count' && sortConfig['sec:' + sectionId]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['sec:' + sectionId]?.column === 'count' && sortConfig['sec:' + sectionId]?.dir === 'desc' }">Count</th>
-                                            <th>Tags</th>
-                                            <th @click="toggleSort('sec:' + sectionId, 'total')"
-                                                :class="{ 'sorted-asc': sortConfig['sec:' + sectionId]?.column === 'total' && sortConfig['sec:' + sectionId]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['sec:' + sectionId]?.column === 'total' && sortConfig['sec:' + sectionId]?.dir === 'desc' }">Total</th>
-                                            <th @click="toggleSort('sec:' + sectionId, 'total')"
-                                                :class="{ 'sorted-asc': sortConfig['sec:' + sectionId]?.column === 'total' && sortConfig['sec:' + sectionId]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['sec:' + sectionId]?.column === 'total' && sortConfig['sec:' + sectionId]?.dir === 'desc' }">%</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <template v-for="(merchant, merchantId) in section.filteredMerchants" :key="merchantId">
-                                            <tr class="merchant-row"
-                                                :class="{ expanded: expandedMerchants.has(merchantId) }"
-                                                @click="toggleExpand(merchantId)">
-                                                <td class="merchant clickable">
-                                                    <span class="chevron">{{ expandedMerchants.has(merchantId) ? '▼' : '▶' }}</span>
-                                                    <span @click.stop="addFilter(merchantId, 'merchant', merchant.displayName)">
-                                                        {{ merchant.displayName }}
-                                                    </span>
-                                                </td>
-                                                <td class="category clickable" @click.stop="addFilter(merchant.subcategory, 'category')">
-                                                    {{ merchant.subcategory }}
-                                                </td>
-                                                <td>{{ merchant.filteredCount }}</td>
-                                                <td class="tags-cell">
-                                                    <span v-for="tag in (merchant.tags || [])"
-                                                          :key="tag"
-                                                          class="tag-badge"
-                                                          @click.stop="addFilter(tag, 'tag')">{{ tag }}</span>
-                                                </td>
-                                                <td class="money">{{ formatCurrency(merchant.filteredTotal) }}</td>
-                                                <td class="pct">{{ formatPct(merchant.filteredTotal, section.filteredTotal) }}</td>
-                                            </tr>
-                                            <tr v-for="txn in merchant.filteredTxns"
-                                                :key="txn.id"
-                                                class="txn-row"
-                                                :class="{ hidden: !expandedMerchants.has(merchantId) }">
-                                                <td colspan="6">
-                                                    <div class="txn-detail">
-                                                        <span class="txn-date">{{ formatDate(txn.date) }}</span>
-                                                        <span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span>
-                                                        <span class="txn-desc">{{ txn.description }}</span>
-                                                        <span class="txn-amount">{{ formatCurrency(txn.amount) }}</span>
-                                                        <span class="txn-badge" :class="{ refund: txn.amount < 0 }">{{ txn.amount < 0 ? 'REFUND' : '' }}</span>
-                                                        <span v-if="txn.location"
-                                                              class="txn-location clickable"
-                                                              :class="getLocationClass(txn.location)"
-                                                              @click.stop="addFilter(txn.location, 'location')">
-                                                            {{ txn.location }}
-                                                        </span>
-                                                        <span v-for="tag in (txn.tags || [])"
-                                                              :key="tag"
-                                                              class="tag-badge"
-                                                              @click.stop="addFilter(tag, 'tag')">{{ tag }}</span>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        </template>
-                                        <tr class="total-row">
-                                            <td colspan="4">Total</td>
-                                            <td class="money">{{ formatCurrency(section.filteredTotal) }}</td>
-                                            <td class="pct">100%</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </section>
-                </template>
+                <merchant-section
+                    v-for="(section, sectionId) in filteredSectionView"
+                    :key="sectionId"
+                    :section-key="'sec:' + sectionId"
+                    :title="section.title"
+                    :items="Object.values(section.filteredMerchants)"
+                    :total-amount="section.filteredTotal"
+                    :category-total="section.filteredTotal"
+                    :grand-total="grandTotal"
+                    :num-months="numFilteredMonths"
+                    :category-mode="true"
+                    :collapsed-sections="collapsedSections"
+                    :sort-config="sortConfig"
+                    :expanded-items="expandedMerchants"
+                    :toggle-section="toggleSection"
+                    :toggle-sort="toggleSort"
+                    :format-currency="formatCurrency"
+                    :format-date="formatDate"
+                    :format-pct="formatPct"
+                    :add-filter="addFilter"
+                    :get-location-class="getLocationClass"
+                ></merchant-section>
             </template>
 
             <!-- Category View -->
             <template v-if="currentView === 'category'">
-            <template v-for="(category, categoryName) in positiveCategoryView" :key="categoryName">
-                    <section class="category-section">
-                        <div class="section-header" @click="toggleSection('cat:' + categoryName)">
-                            <h2>
-                                <span class="toggle">{{ collapsedSections.has('cat:' + categoryName) ? '▶' : '▼' }}</span>
-                                <span class="category-dot" :style="{ backgroundColor: categoryColorMap[categoryName] }"></span>
-                                {{ categoryName }}
-                            </h2>
-                            <span class="section-total">
-                                <span class="section-monthly">{{ formatCurrency(category.filteredTotal / numFilteredMonths) }}/mo</span> ·
-                                <span class="section-ytd">{{ formatCurrency(category.filteredTotal) }}</span>
-                                <span class="section-pct">({{ formatPct(category.filteredTotal, grandTotal) }})</span>
-                            </span>
-                        </div>
-                        <div class="section-content" :class="{ collapsed: collapsedSections.has('cat:' + categoryName) }">
-                            <div class="table-wrapper">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th @click="toggleSort('cat:' + categoryName, 'merchant')"
-                                                :class="{ 'sorted-asc': sortConfig['cat:' + categoryName]?.column === 'merchant' && sortConfig['cat:' + categoryName]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['cat:' + categoryName]?.column === 'merchant' && sortConfig['cat:' + categoryName]?.dir === 'desc' }">Merchant</th>
-                                            <th @click="toggleSort('cat:' + categoryName, 'subcategory')"
-                                                :class="{ 'sorted-asc': sortConfig['cat:' + categoryName]?.column === 'subcategory' && sortConfig['cat:' + categoryName]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['cat:' + categoryName]?.column === 'subcategory' && sortConfig['cat:' + categoryName]?.dir === 'desc' }">Subcategory</th>
-                                            <th @click="toggleSort('cat:' + categoryName, 'count')"
-                                                :class="{ 'sorted-asc': sortConfig['cat:' + categoryName]?.column === 'count' && sortConfig['cat:' + categoryName]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['cat:' + categoryName]?.column === 'count' && sortConfig['cat:' + categoryName]?.dir === 'desc' }">Count</th>
-                                            <th>Tags</th>
-                                            <th @click="toggleSort('cat:' + categoryName, 'total')"
-                                                :class="{ 'sorted-asc': sortConfig['cat:' + categoryName]?.column === 'total' && sortConfig['cat:' + categoryName]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['cat:' + categoryName]?.column === 'total' && sortConfig['cat:' + categoryName]?.dir === 'desc' }">Total</th>
-                                            <th @click="toggleSort('cat:' + categoryName, 'total')"
-                                                :class="{ 'sorted-asc': sortConfig['cat:' + categoryName]?.column === 'total' && sortConfig['cat:' + categoryName]?.dir === 'asc',
-                                                          'sorted-desc': sortConfig['cat:' + categoryName]?.column === 'total' && sortConfig['cat:' + categoryName]?.dir === 'desc' }">%</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <template v-for="merchant in category.sortedMerchants" :key="merchant.id">
-                                            <tr class="merchant-row"
-                                                :class="{ expanded: expandedMerchants.has(merchant.id) }"
-                                                @click="toggleExpand(merchant.id)">
-                                                <td class="merchant clickable">
-                                                    <span class="chevron">{{ expandedMerchants.has(merchant.id) ? '▼' : '▶' }}</span>
-                                                    <span @click.stop="addFilter(merchant.id, 'merchant', merchant.displayName)">
-                                                        {{ merchant.displayName }}
-                                                    </span>
-                                                </td>
-                                                <td class="category clickable" @click.stop="addFilter(merchant.subcategory, 'category')">
-                                                    {{ merchant.subcategory }}
-                                                </td>
-                                                <td>{{ merchant.filteredCount }}</td>
-                                                <td class="tags-cell">
-                                                    <span v-for="tag in (merchant.tags || [])"
-                                                          :key="tag"
-                                                          class="tag-badge"
-                                                          @click.stop="addFilter(tag, 'tag')">{{ tag }}</span>
-                                                </td>
-                                                <td class="money">{{ formatCurrency(merchant.filteredTotal) }}</td>
-                                                <td class="pct">{{ formatPct(merchant.filteredTotal, category.filteredTotal) }}</td>
-                                            </tr>
-                                            <tr v-for="txn in merchant.filteredTxns"
-                                                :key="txn.id"
-                                                class="txn-row"
-                                                :class="{ hidden: !expandedMerchants.has(merchant.id) }">
-                                                <td colspan="6">
-                                                    <div class="txn-detail">
-                                                        <span class="txn-date">{{ formatDate(txn.date) }}</span>
-                                                        <span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span>
-                                                        <span class="txn-desc">{{ txn.description }}</span>
-                                                        <span class="txn-amount">{{ formatCurrency(txn.amount) }}</span>
-                                                        <span class="txn-badge" :class="{ refund: txn.amount < 0 }">{{ txn.amount < 0 ? 'REFUND' : '' }}</span>
-                                                        <span v-if="txn.location"
-                                                              class="txn-location clickable"
-                                                              :class="getLocationClass(txn.location)"
-                                                              @click.stop="addFilter(txn.location, 'location')">
-                                                            {{ txn.location }}
-                                                        </span>
-                                                        <span v-for="tag in (txn.tags || [])"
-                                                              :key="tag"
-                                                              class="tag-badge"
-                                                              @click.stop="addFilter(tag, 'tag')">{{ tag }}</span>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        </template>
-                                        <tr class="total-row">
-                                            <td colspan="4">Total</td>
-                                            <td class="money">{{ formatCurrency(category.filteredTotal) }}</td>
-                                            <td class="pct">100%</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </section>
-                </template>
+                <merchant-section
+                    v-for="(category, categoryName) in positiveCategoryView"
+                    :key="categoryName"
+                    :section-key="'cat:' + categoryName"
+                    :title="categoryName"
+                    :items="category.sortedMerchants"
+                    :total-amount="category.filteredTotal"
+                    :category-total="category.filteredTotal"
+                    :grand-total="grandTotal"
+                    :num-months="numFilteredMonths"
+                    :header-color="categoryColorMap[categoryName]"
+                    :category-mode="true"
+                    :collapsed-sections="collapsedSections"
+                    :sort-config="sortConfig"
+                    :expanded-items="expandedMerchants"
+                    :toggle-section="toggleSection"
+                    :toggle-sort="toggleSort"
+                    :format-currency="formatCurrency"
+                    :format-date="formatDate"
+                    :format-pct="formatPct"
+                    :add-filter="addFilter"
+                    :get-location-class="getLocationClass"
+                ></merchant-section>
             </template>
 
             <!-- Credits Section (refunds/credits that reduced spending) -->
-            <section class="credits-section" v-if="creditMerchants.length > 0">
-                <div class="section-header">
-                    <h2>
-                        <span class="toggle">▼</span>
-                        Credits Applied
-                    </h2>
-                    <span class="section-total">
-                        <span class="section-ytd credit-amount">+{{ formatCurrency(creditsTotal) }}</span>
-                        <span class="section-pct">(reduced spending)</span>
-                    </span>
-                </div>
-                <div class="section-content">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Source</th>
-                                <th>Category</th>
-                                <th>Tags</th>
-                                <th>Count</th>
-                                <th class="money">Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template v-for="credit in creditMerchants" :key="credit.id">
-                                <tr class="merchant-row" @click="expandedMerchants.has(credit.id) ? expandedMerchants.delete(credit.id) : expandedMerchants.add(credit.id)">
-                                    <td>
-                                        <span class="expand-arrow">{{ expandedMerchants.has(credit.id) ? '▼' : '▶' }}</span>
-                                        {{ credit.displayName }}
-                                    </td>
-                                    <td class="category">{{ credit.subcategory }}</td>
-                                    <td class="tags">
-                                        <span v-for="tag in [...new Set(credit.filteredTxns.flatMap(t => t.tags || []))]" :key="tag" class="tag-badge">{{ tag }}</span>
-                                    </td>
-                                    <td>{{ credit.filteredCount }}</td>
-                                    <td class="money credit-amount">+{{ formatCurrency(credit.creditAmount) }}</td>
-                                </tr>
-                                <tr v-for="txn in credit.filteredTxns"
-                                    :key="txn.id"
-                                    class="txn-row"
-                                    :class="{ hidden: !expandedMerchants.has(credit.id) }">
-                                    <td colspan="5">
-                                        <div class="txn-detail">
-                                            <span class="txn-date">{{ formatDate(txn.date) }}</span>
-                                            <span class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span>
-                                            <span class="txn-desc">{{ txn.description }}</span>
-                                            <span class="txn-amount credit-amount">+{{ formatCurrency(Math.abs(txn.amount)) }}</span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                        <tfoot>
-                            <tr class="total-row">
-                                <td colspan="4">Total Credits</td>
-                                <td class="money credit-amount">+{{ formatCurrency(creditsTotal) }}</td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-            </section>
+            <merchant-section
+                v-if="creditMerchants.length > 0"
+                section-key="credits"
+                title="Credits Applied"
+                :items="creditMerchants"
+                :show-total="true"
+                :total-amount="creditsTotal"
+                total-label="Total Credits"
+                subtitle="(reduced spending)"
+                :credit-mode="true"
+                :collapsed-sections="collapsedSections"
+                :sort-config="sortConfig"
+                :expanded-items="expandedMerchants"
+                :toggle-section="toggleSection"
+                :toggle-sort="toggleSort"
+                :format-currency="formatCurrency"
+                :format-date="formatDate"
+                :add-filter="addFilter"
+            ></merchant-section>
 
             <!-- Excluded Section -->
-            <section class="excluded-section" v-if="filteredExcludedCount > 0">
-                <div class="section-header" @click="showExcluded = !showExcluded">
-                    <h2>
-                        <span class="toggle">{{ showExcluded ? '▼' : '▶' }}</span>
-                        Excluded
-                    </h2>
-                    <span class="section-total">
-                        <span class="section-pct">({{ filteredExcludedCount }} transactions, not included in spending)</span>
-                    </span>
-                </div>
-                <div class="section-content" v-show="showExcluded">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Merchant</th>
-                                <th>Category</th>
-                                <th>Tags</th>
-                                <th>Count</th>
-                                <th class="money">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template v-for="(group, idx) in groupedExcluded" :key="idx">
-                                <tr class="merchant-row" @click="expandedExcluded.has(idx) ? expandedExcluded.delete(idx) : expandedExcluded.add(idx)">
-                                    <td>
-                                        <span class="expand-arrow">{{ expandedExcluded.has(idx) ? '▼' : '▶' }}</span>
-                                        {{ group.merchant }}
-                                    </td>
-                                    <td class="category">{{ group.subcategory }}</td>
-                                    <td class="tags-cell">
-                                        <span v-for="tag in (group.tags || [])"
-                                              :key="tag"
-                                              class="tag-badge"
-                                              @click.stop="addFilter(tag, 'tag')">{{ tag }}</span>
-                                    </td>
-                                    <td>{{ group.count }}</td>
-                                    <td class="money" :class="{ 'income-amount': group.tags && group.tags.includes('income'), 'negative-amount': group.total < 0 && !(group.tags && group.tags.includes('income')) }">
-                                        {{ group.tags && group.tags.includes('income') ? '+' + formatCurrency(Math.abs(group.total)) : formatCurrency(group.total) }}
-                                    </td>
-                                </tr>
-                                <tr v-for="txn in group.transactions"
-                                    :key="txn.id"
-                                    class="txn-row"
-                                    :class="{ hidden: !expandedExcluded.has(idx) }">
-                                    <td colspan="5">
-                                        <div class="txn-detail">
-                                            <span class="txn-date">{{ formatDate(txn.date) }}</span>
-                                            <span class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span>
-                                            <span class="txn-desc">{{ txn.description }}</span>
-                                            <span class="txn-amount" :class="{ 'income-amount': txn.tags && txn.tags.includes('income'), 'negative-amount': txn.amount < 0 && !(txn.tags && txn.tags.includes('income')) }">
-                                                {{ txn.tags && txn.tags.includes('income') ? '+' + formatCurrency(Math.abs(txn.amount)) : formatCurrency(txn.amount) }}
-                                            </span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                        <tfoot>
-                            <tr class="total-row">
-                                <td colspan="3">Total</td>
-                                <td>{{ filteredExcludedCount }}</td>
-                                <td class="money"></td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-            </section>
+            <merchant-section
+                v-if="groupedExcluded.length > 0"
+                section-key="excluded"
+                title="Excluded"
+                :items="groupedExcluded"
+                subtitle="(not included in spending)"
+                :collapsed-sections="collapsedSections"
+                :sort-config="sortConfig"
+                :expanded-items="expandedExcluded"
+                :toggle-section="toggleSection"
+                :toggle-sort="toggleSort"
+                :format-currency="formatCurrency"
+                :format-date="formatDate"
+                :add-filter="addFilter"
+            ></merchant-section>
 
             <!-- Footer -->
             <footer>
