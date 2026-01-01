@@ -390,7 +390,7 @@ def export_json(stats, verbose=0, category_filter=None, merchant_filter=None):
             'num_months': stats['num_months'],
             'income_total': round(income_total, 2),
             'transfers_total': round(transfers_total, 2),
-            'net_cash_flow': round(income_total - stats['total'] - transfers_total, 2) if income_total > 0 else None,
+            'net_cash_flow': round(income_total - stats['total'], 2) if income_total > 0 else None,  # transfers excluded
         },
         'by_month': {month: {'total': round(data['total'], 2), 'count': data['count']}
                      for month, data in sorted(by_month.items())},
@@ -442,17 +442,16 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
     by_merchant = stats.get('by_merchant', {})
     by_month = stats.get('by_month', {})
     by_category = stats.get('by_category', {})
-    excluded_transactions = stats.get('excluded_transactions', [])
+    summary = stats.get('summary', {})
+
+    # Use pre-computed values from summary
+    income_total = summary.get('income_total', 0)
+    transfers_total = summary.get('transfers_total', 0)
+    net_cash_flow = summary.get('net_cash_flow')
 
     # Calculate gross spending and credits
     gross_spending = sum(d['total'] for d in by_merchant.values() if d['total'] > 0)
     credits_total = abs(sum(d['total'] for d in by_merchant.values() if d['total'] < 0))
-
-    # Calculate income and transfers
-    income_total = abs(sum(t['amount'] for t in excluded_transactions
-                          if 'income' in [tag.lower() for tag in t.get('tags', [])]))
-    transfers_total = abs(sum(t['amount'] for t in excluded_transactions
-                              if 'transfer' in [tag.lower() for tag in t.get('tags', [])]))
 
     lines = ['# Spending Analysis\n']
 
@@ -465,18 +464,17 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
         lines.append(f"- **Gross Spending:** ${gross_spending:.2f}")
     lines.append(f"- **Data Period:** {stats['num_months']} months\n")
 
-    # Cash Flow
-    if income_total > 0:
+    # Cash Flow (uses pre-computed net_cash_flow which excludes transfers)
+    if income_total > 0 and net_cash_flow is not None:
         lines.append('## Cash Flow\n')
         lines.append(f"| Item | Amount |")
         lines.append(f"|------|--------|")
         lines.append(f"| Income | +${income_total:,.2f} |")
         lines.append(f"| Spending | -${stats['total']:,.2f} |")
+        sign = '+' if net_cash_flow >= 0 else ''
+        lines.append(f"| **Net Cash Flow** | **{sign}${net_cash_flow:,.2f}** |")
         if transfers_total > 0:
-            lines.append(f"| Transfers | -${transfers_total:,.2f} |")
-        net = income_total - stats['total'] - transfers_total
-        sign = '+' if net >= 0 else ''
-        lines.append(f"| **Net Cash Flow** | **{sign}${net:,.2f}** |")
+            lines.append(f"| *(Transfers)* | *${transfers_total:,.2f}* |")
         lines.append('')
 
     # Monthly Breakdown
@@ -564,23 +562,17 @@ def print_summary(stats, year=2025, filter_category=None, currency_format="${amo
     by_category = stats['by_category']
     by_merchant = stats.get('by_merchant', {})
     by_month = stats.get('by_month', {})
-    excluded_transactions = stats.get('excluded_transactions', [])
+    summary = stats.get('summary', {})
 
-    # Calculate actual spending (transactions tagged income/transfer already excluded)
-    actual_spending = sum(data['total'] for (cat, sub), data in by_category.items())
+    # Use pre-computed values from summary (single source of truth)
+    actual_spending = stats.get('total', 0)
+    income_total = summary.get('income_total', 0)
+    transfers_total = summary.get('transfers_total', 0)
+    net_cash_flow = summary.get('net_cash_flow')
 
     # Calculate gross spending (positive merchants only) and credits (negative merchants)
     gross_spending = sum(d['total'] for d in by_merchant.values() if d['total'] > 0)
     credits_total = abs(sum(d['total'] for d in by_merchant.values() if d['total'] < 0))
-
-    # Calculate income and transfers from excluded transactions
-    income_total = abs(sum(t['amount'] for t in excluded_transactions
-                          if 'income' in [tag.lower() for tag in t.get('tags', [])]))
-    transfers_total = abs(sum(t['amount'] for t in excluded_transactions
-                              if 'transfer' in [tag.lower() for tag in t.get('tags', [])]))
-
-    # Net cash flow: income - spending - transfers
-    net_cash_flow = income_total - actual_spending - transfers_total if income_total > 0 else None
 
     # =========================================================================
     # SPENDING SUMMARY
@@ -601,17 +593,17 @@ def print_summary(stats, year=2025, filter_category=None, currency_format="${amo
     # =========================================================================
     # CASH FLOW (if income exists)
     # =========================================================================
-    if income_total > 0:
+    if income_total > 0 and net_cash_flow is not None:
         print("\n" + "=" * 80)
         print("CASH FLOW")
         print("=" * 80)
         print(f"\nIncome:                     +{fmt(income_total):>14}")
         print(f"Spending:                   -{fmt(actual_spending):>14}")
-        if transfers_total > 0:
-            print(f"Transfers:                  -{fmt(transfers_total):>14}")
         print("-" * 50)
         sign = '+' if net_cash_flow >= 0 else ''
         print(f"Net Cash Flow:              {sign}{fmt(net_cash_flow):>14}")
+        if transfers_total > 0:
+            print(f"\n(Transfers:                  {fmt(transfers_total):>14})")
     elif stats.get('excluded_count', 0) > 0:
         # Show excluded info if no income
         print()
