@@ -7,7 +7,6 @@ Loads settings from YAML config files.
 import os
 
 from .format_parser import parse_format_string, is_special_parser_type
-from .classification_rules import get_fallback_rules_parsed
 from .section_engine import load_sections, SectionParseError
 
 # Try to import yaml, fall back to simple parsing if not available
@@ -249,8 +248,6 @@ def load_config(config_dir, settings_file='settings.yaml'):
     # Currency format for display (default: USD)
     config['currency_format'] = config.get('currency_format', '${amount}')
 
-    # All merchants classified as 'variable' - views.rules handles custom sections
-    config['classification_rules'] = get_fallback_rules_parsed()
 
     # Load merchants file (optional - merchants_file in settings.yaml)
     # This is the new .rules format; merchant_categories.csv is deprecated

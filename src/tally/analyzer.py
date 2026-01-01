@@ -485,70 +485,6 @@ def auto_detect_csv_format(filepath):
 
 
 # ============================================================================
-# ANALYSIS - OCCURRENCE-BASED CLASSIFICATION
-# ============================================================================
-
-def classify_by_occurrence(merchant, data, num_months=12, rules=None):
-    """Classify a merchant based on transaction occurrence patterns using rules.
-
-    Uses the classification rule engine to determine:
-    - Which bucket the merchant belongs to (monthly, annual, travel, etc.)
-    - How to calculate the monthly value (avg vs /12)
-
-    Args:
-        merchant: The merchant name
-        data: Transaction data dictionary with keys:
-            - category, subcategory
-            - months_active, count, total
-            - cv (coefficient of variation)
-            - max_payment
-            - is_consistent
-        num_months: Total months of data available (for proportional thresholds)
-        rules: List of ClassificationRule objects (uses defaults if None)
-
-    Returns: tuple of (bucket, calc_type, reasoning_dict)
-        - bucket: 'travel', 'annual', 'periodic', 'monthly', 'one_off', 'variable'
-        - calc_type: 'avg' or '/12'
-        - reasoning: dict with classification details
-    """
-    from .classification_rules import classify_merchant, get_fallback_rules_parsed
-
-    # Use fallback rules if none provided
-    if rules is None:
-        rules = get_fallback_rules_parsed()
-
-    # Build stats dict for rule engine
-    stats = {
-        'category': data.get('category', ''),
-        'subcategory': data.get('subcategory', ''),
-        'months_active': data.get('months_active', 1),
-        'count': data.get('count', 0),
-        'total': data.get('total', 0),
-        'cv': data.get('cv', 0),
-        'max_payment': data.get('max_payment', 0),
-    }
-
-    # Classify using rule engine
-    bucket, calc_type = classify_merchant(stats, rules, num_months)
-
-    # Build reasoning structure for backward compatibility
-    reasoning = {
-        'trace': [],
-        'thresholds': {
-            'bill_threshold': max(2, int(num_months * 0.5)),
-            'general_threshold': max(3, int(num_months * 0.75)),
-        },
-        'decision': f"{bucket.title()}: classified by rule engine",
-        'category': stats['category'],
-        'subcategory': stats['subcategory'],
-        'months_active': stats['months_active'],
-        'num_months': num_months,
-        'cv': round(stats['cv'], 2),
-        'is_consistent': data.get('is_consistent', stats['cv'] < 0.3),
-        'calc_type': calc_type,
-    }
-
-    return (bucket, calc_type, reasoning)
 
 
 def analyze_transactions(transactions):
@@ -661,75 +597,47 @@ def analyze_transactions(transactions):
         data['months'] = sorted(list(data['months']))
 
     # =========================================================================
-    # CLASSIFY BY OCCURRENCE PATTERN
+    # CALCULATE MONTHLY VALUES
     # =========================================================================
-    monthly_merchants = {}   # Appears 6+ months
-    annual_merchants = {}    # True annual bills (insurance, tax - once a year)
-    periodic_merchants = {}  # Periodic recurring (tuition, quarterly payments)
-    travel_merchants = {}    # Travel-related
-    one_off_merchants = {}   # High-value infrequent
-    variable_merchants = {}  # Discretionary
-
+    # All merchants use YTD/12 for monthly value calculation
+    # Custom grouping/views are defined in views.rules
     for merchant, data in by_merchant.items():
-        classification, calc_type, reasoning = classify_by_occurrence(merchant, data, num_months)
-        # Store classification and calc_type in merchant data
-        data['classification'] = classification
-        data['calc_type'] = calc_type
-        data['reasoning'] = reasoning
-        if classification == 'monthly':
-            monthly_merchants[merchant] = data
-        elif classification == 'annual':
-            annual_merchants[merchant] = data
-        elif classification == 'periodic':
-            periodic_merchants[merchant] = data
-        elif classification == 'travel':
-            travel_merchants[merchant] = data
-        elif classification == 'one_off':
-            one_off_merchants[merchant] = data
-        elif classification == 'variable':
-            variable_merchants[merchant] = data
+        data['classification'] = 'variable'
+        data['calc_type'] = '/12'
+        monthly_value = data['total'] / 12
+        data['monthly_value'] = monthly_value
+        data['calc_reasoning'] = 'Spread over 12 months'
+        data['calc_formula'] = f"total / 12 = {data['total']:.2f} / 12 = {monthly_value:.2f}"
+        data['reasoning'] = {
+            'category': data.get('category', ''),
+            'subcategory': data.get('subcategory', ''),
+            'months_active': data.get('months_active', 1),
+            'num_months': num_months,
+            'cv': round(data.get('cv', 0), 2),
+        }
 
-    # =========================================================================
-    # CALCULATE TOTALS
-    # =========================================================================
-    monthly_total = sum(d['total'] for d in monthly_merchants.values())
-    annual_total = sum(d['total'] for d in annual_merchants.values())
-    periodic_total = sum(d['total'] for d in periodic_merchants.values())
-    travel_total = sum(d['total'] for d in travel_merchants.values())
-    one_off_total = sum(d['total'] for d in one_off_merchants.values())
+    # Legacy bucket support - all merchants go into variable
+    # Views.rules handles custom grouping
+    monthly_merchants = {}
+    annual_merchants = {}
+    periodic_merchants = {}
+    travel_merchants = {}
+    one_off_merchants = {}
+    variable_merchants = dict(by_merchant)
+
+    # Bucket totals - all spending is variable now (views.rules handles custom grouping)
+    monthly_total = 0
+    annual_total = 0
+    periodic_total = 0
+    travel_total = 0
+    one_off_total = 0
     variable_total = sum(d['total'] for d in variable_merchants.values())
 
-    # =========================================================================
-    # CALCULATE MONTHLY VALUES (using calc_type from rule engine)
-    # =========================================================================
-
-    def compute_monthly_value(data):
-        """Compute monthly value based on calc_type from rule engine."""
-        calc_type = data.get('calc_type', '/12')
-        if calc_type == 'avg':
-            monthly_value = data.get('avg_when_active', data['total'] / max(data['months_active'], 1))
-            data['calc_reasoning'] = f"CV={data['cv']:.2f} (<0.3), using average when active"
-            data['calc_formula'] = f"avg_when_active = {data['total']:.2f} / {data['months_active']} months = {monthly_value:.2f}"
-        else:
-            monthly_value = data['total'] / 12
-            data['calc_reasoning'] = f"Spread over 12 months"
-            data['calc_formula'] = f"total / 12 = {data['total']:.2f} / 12 = {monthly_value:.2f}"
-        data['monthly_value'] = monthly_value
-        return monthly_value
-
-    # Compute monthly values for all buckets
-    monthly_avg = sum(compute_monthly_value(d) for d in monthly_merchants.values())
-    annual_monthly = annual_total / 12
-    for data in annual_merchants.values():
-        compute_monthly_value(data)
-    periodic_monthly = periodic_total / 12
-    for data in periodic_merchants.values():
-        compute_monthly_value(data)
-    for data in travel_merchants.values():
-        compute_monthly_value(data)
-    for data in one_off_merchants.values():
-        compute_monthly_value(data)
-    variable_monthly = sum(compute_monthly_value(d) for d in variable_merchants.values())
+    # Monthly value averages - all in variable
+    monthly_avg = 0
+    annual_monthly = 0
+    periodic_monthly = 0
+    variable_monthly = sum(d.get('monthly_value', 0) for d in variable_merchants.values())
 
     # Calculate totals only from non-excluded transactions
     included_transactions = [t for t in transactions if not t.get('excluded')]
